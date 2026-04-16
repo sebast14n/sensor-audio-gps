@@ -1,0 +1,2 @@
+rootProject.name = "sensor-audio-gps"
+include ':app'
