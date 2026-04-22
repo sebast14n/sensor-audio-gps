@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace "com.example.logger"
+    namespace "com.example.sensoraudiogps"
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.example.logger"
+        applicationId "com.example.sensoraudiogps"
         minSdk 26
         targetSdk 34
         versionCode 1
@@ -19,6 +19,15 @@ android {
         release {
             minifyEnabled false
         }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
     }
 }
 
