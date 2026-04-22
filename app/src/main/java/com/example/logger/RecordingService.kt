@@ -19,9 +19,9 @@ class RecordingService : Service() {
 
     companion object {
         var isRunning = false
-        private const val CHANNEL_ID   = "recording_channel"
-        private const val NOTIF_ID     = 1
-        private const val SEGMENT_MS   = 10 * 60 * 1000L
+        private const val CHANNEL_ID = "recording_channel"
+        private const val NOTIF_ID   = 1
+        private const val SEGMENT_MS = 10 * 60 * 1000L
     }
 
     private var recorder: MediaRecorder? = null
@@ -33,6 +33,10 @@ class RecordingService : Service() {
     private var segmentIndex = 0
     private val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
 
+    private var staticLat: Double? = null
+    private var staticLon: Double? = null
+    private var gpsAvailable = false
+
     override fun onCreate() {
         super.onCreate()
         isRunning = true
@@ -40,6 +44,10 @@ class RecordingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val lat = intent?.getDoubleExtra("static_lat", Double.NaN) ?: Double.NaN
+        val lon = intent?.getDoubleExtra("static_lon", Double.NaN) ?: Double.NaN
+        if (!lat.isNaN() && !lon.isNaN()) { staticLat = lat; staticLon = lon }
+
         startForeground(NOTIF_ID, buildNotification())
         startSession()
         return START_STICKY
@@ -68,7 +76,13 @@ class RecordingService : Service() {
             "  <trk><n>$ts</n><trkseg>\n"
         )
 
-        startGps()
+        if (staticLat != null && staticLon != null) {
+            writeStaticPoint(staticLat!!, staticLon!!)
+            updateNotification("Audio + locație statică (${"%.4f".format(staticLat)}, ${"%.4f".format(staticLon)})")
+        } else {
+            startGps()
+        }
+
         startAudioSegment()
 
         segmentTimer = Timer()
@@ -107,12 +121,25 @@ class RecordingService : Service() {
     private fun startGps() {
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
+        if (locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) != true) {
+            updateNotification("⚠️ GPS dezactivat — doar audio")
+            return
+        }
+
         locationListener = object : LocationListener {
-            override fun onLocationChanged(loc: Location) { writeGpxPoint(loc) }
+            override fun onLocationChanged(loc: Location) {
+                if (!gpsAvailable) {
+                    gpsAvailable = true
+                    updateNotification("🔴 Audio + GPS activ")
+                }
+                writeGpxPoint(loc)
+            }
             @Deprecated("Deprecated")
             override fun onStatusChanged(p: String?, s: Int, e: Bundle?) {}
             override fun onProviderEnabled(p: String) {}
-            override fun onProviderDisabled(p: String) {}
+            override fun onProviderDisabled(p: String) {
+                updateNotification("⚠️ GPS oprit în timpul înregistrării")
+            }
         }
 
         try {
@@ -133,6 +160,18 @@ class RecordingService : Service() {
         )
     }
 
+    private fun writeStaticPoint(lat: Double, lon: Double) {
+        val utc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+            .also { it.timeZone = TimeZone.getTimeZone("UTC") }
+            .format(Date())
+        gpxFile?.appendText(
+            "    <!-- locatie statica introdusa manual -->\n" +
+            "    <trkpt lat=\"$lat\" lon=\"$lon\">\n" +
+            "      <ele>0</ele><time>$utc</time>\n" +
+            "    </trkpt>\n"
+        )
+    }
+
     private fun closeGpx() {
         try { gpxFile?.appendText("  </trkseg></trk>\n</gpx>\n") } catch (_: Exception) {}
     }
@@ -144,17 +183,22 @@ class RecordingService : Service() {
         }
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(text: String = "Pornire..."): Notification {
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("SensorLogger — înregistrare activă")
-            .setContentText("Audio + GPS în curs")
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(open)
             .setOngoing(true)
             .build()
+    }
+
+    private fun updateNotification(text: String) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIF_ID, buildNotification(text))
     }
 }
