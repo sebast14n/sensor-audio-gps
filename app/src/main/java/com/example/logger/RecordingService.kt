@@ -3,6 +3,7 @@ package com.example.logger
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -10,6 +11,7 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.text.SimpleDateFormat
@@ -37,10 +39,16 @@ class RecordingService : Service() {
     private var staticLon: Double? = null
     private var gpsAvailable = false
 
+    // WakeLock — previne adormirea CPU-ului cand ecranul e inactiv
+    private var wakeLock: PowerManager.WakeLock? = null
+
     override fun onCreate() {
         super.onCreate()
         isRunning = true
         createChannel()
+        wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SensorLogger::RecordingWakeLock")
+        wakeLock?.acquire()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -48,7 +56,17 @@ class RecordingService : Service() {
         val lon = intent?.getDoubleExtra("static_lon", Double.NaN) ?: Double.NaN
         if (!lat.isNaN() && !lon.isNaN()) { staticLat = lat; staticLon = lon }
 
-        startForeground(NOTIF_ID, buildNotification())
+        // Android 14+ cere declararea explicita a tipului de serviciu
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIF_ID, buildNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            )
+        } else {
+            startForeground(NOTIF_ID, buildNotification())
+        }
+
         startSession()
         return START_STICKY
     }
@@ -60,6 +78,7 @@ class RecordingService : Service() {
         stopAudio()
         closeGpx()
         locationListener?.let { locationManager?.removeUpdates(it) }
+        if (wakeLock?.isHeld == true) wakeLock?.release()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
