@@ -85,7 +85,11 @@ class MainActivity : AppCompatActivity() {
         btnUpload.setOnClickListener { showSessionPicker() }
         btnSetToken.setOnClickListener { showTokenDialog() }
         btnQrAuth.setOnClickListener { startActivityForResult(Intent(this, QrScanActivity::class.java), 300) }
-        btnCompass.setOnClickListener { showCompassDestinationDialog() }
+        btnCompass.setOnClickListener {
+            // Deschide lista de POI-uri (sincronizate de pe BioEcho web).
+            // Permite si destinatie manuala ad-hoc din lista.
+            startActivity(Intent(this, PoisListActivity::class.java))
+        }
 
         // Solicita exceptare de la battery optimization la prima rulare
         requestBatteryOptimizationExemption()
