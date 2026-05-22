@@ -21,7 +21,7 @@ import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.IMyLocationConsumer
 import org.osmdroid.views.overlay.mylocation.IMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
-import org.osmdroid.views.overlay.CacheManager
+import org.osmdroid.tileprovider.cachemanager.CacheManager
 
 class MapActivity : AppCompatActivity() {
 
