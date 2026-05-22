@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -23,17 +24,24 @@ object UpdateChecker {
     private const val KEY_DISMISSED_VERSION = "update_dismissed_version"
 
     /**
-     * Verifică în background. Dacă apare versiune nouă, arată dialog non-intrusive.
-     * Apelează din MainActivity.onResume() sau onCreate() — silentios la eșec.
+     * Verifică în background. Daca apare versiune noua, arata dialog. Verbose=true -> arata Toast cu rezultatul.
      */
-    fun checkAsync(activity: AppCompatActivity) {
+    fun checkAsync(activity: AppCompatActivity, verbose: Boolean = true) {
         Thread {
+            val current = BuildConfig.VERSION_NAME
             try {
                 val url = URL(ENDPOINT)
                 val conn = url.openConnection() as HttpURLConnection
                 conn.connectTimeout = 5000
                 conn.readTimeout = 8000
-                if (conn.responseCode != 200) { conn.disconnect(); return@Thread }
+                if (conn.responseCode != 200) {
+                    val code = conn.responseCode
+                    conn.disconnect()
+                    if (verbose) activity.runOnUiThread {
+                        Toast.makeText(activity, "⚠ Verificare versiune: HTTP $code", Toast.LENGTH_LONG).show()
+                    }
+                    return@Thread
+                }
                 val body = conn.inputStream.bufferedReader().readText()
                 conn.disconnect()
                 val data = JSONObject(body)
@@ -44,21 +52,37 @@ object UpdateChecker {
                 val sizeMb = data.optDouble("apk_size_mb", 0.0)
                 val htmlUrl = data.optString("html_url", "")
 
-                if (latest.isBlank() || apkUrl.isBlank()) return@Thread
+                if (latest.isBlank() || apkUrl.isBlank()) {
+                    if (verbose) activity.runOnUiThread {
+                        Toast.makeText(activity, "Verificare versiune: răspuns gol", Toast.LENGTH_SHORT).show()
+                    }
+                    return@Thread
+                }
 
-                val current = BuildConfig.VERSION_NAME
-                if (!isNewerVersion(latest, current)) return@Thread
+                if (!isNewerVersion(latest, current)) {
+                    if (verbose) activity.runOnUiThread {
+                        Toast.makeText(activity, "✓ Versiunea curentă $current este la zi (latest: $latest)", Toast.LENGTH_SHORT).show()
+                    }
+                    return@Thread
+                }
 
                 // Check dacă user-ul a dismiss-uit această versiune (skip update non-mandatory)
                 val prefs = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 val dismissed = prefs.getString(KEY_DISMISSED_VERSION, "")
-                if (!mandatory && dismissed == latest) return@Thread
+                if (!mandatory && dismissed == latest) {
+                    if (verbose) activity.runOnUiThread {
+                        Toast.makeText(activity, "Versiune $latest disponibila (dismiss-uită)", Toast.LENGTH_SHORT).show()
+                    }
+                    return@Thread
+                }
 
                 activity.runOnUiThread {
                     showUpdateDialog(activity, current, latest, sizeMb, apkUrl, notes, htmlUrl, mandatory)
                 }
             } catch (e: Exception) {
-                // silentios — verificarea e best-effort
+                if (verbose) activity.runOnUiThread {
+                    Toast.makeText(activity, "⚠ Verificare versiune eșuată: ${e.message?.take(80)}", Toast.LENGTH_LONG).show()
+                }
             }
         }.start()
     }

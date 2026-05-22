@@ -72,11 +72,19 @@ class CompassActivity : AppCompatActivity(), SensorEventListener {
 
     override fun onResume() {
         super.onResume()
-        sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-        }
-        sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+        // Prefer TYPE_ROTATION_VECTOR — senzor virtual care fuzioneaza accel+mag+gyro,
+        // mult mai stabil decat lucrul direct cu magnetometru raw.
+        val rotSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        if (rotSensor != null) {
+            sensorManager.registerListener(this, rotSensor, SensorManager.SENSOR_DELAY_UI)
+        } else {
+            // Fallback: accelerometru + magnetometru (telefoane vechi)
+            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
+                sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+            }
+            sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)?.let {
+                sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+            }
         }
     }
 
@@ -87,9 +95,18 @@ class CompassActivity : AppCompatActivity(), SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent) {
         when (event.sensor.type) {
+            Sensor.TYPE_ROTATION_VECTOR -> {
+                SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+                SensorManager.getOrientation(rotationMatrix, orientationAngles)
+                currentAzimuth = Math.toDegrees(orientationAngles[0].toDouble()).toFloat()
+                if (currentAzimuth < 0) currentAzimuth += 360f
+                updateDisplay()
+                return
+            }
             Sensor.TYPE_ACCELEROMETER  -> gravityValues  = event.values.clone()
             Sensor.TYPE_MAGNETIC_FIELD -> magneticValues = event.values.clone()
         }
+        // Fallback path (accel + mag)
         val g = gravityValues ?: return
         val m = magneticValues ?: return
         if (SensorManager.getRotationMatrix(rotationMatrix, null, g, m)) {
@@ -132,7 +149,7 @@ class CompassActivity : AppCompatActivity(), SensorEventListener {
             relBearing in 285.0..345.0 -> "↖ stânga-față"
             else -> ""
         }
-        tvBearing.text = "$hint  ·  ${relBearing.toInt()}° față de privirea ta"
+        tvBearing.text = "$hint\nPrivești spre ${currentAzimuth.toInt()}° · Destinația la ${bearingToTarget.toInt()}° de Nord"
         compassView.setAngles(currentAzimuth, bearingToTarget)
     }
 }
@@ -144,21 +161,15 @@ class CompassView @JvmOverloads constructor(
     private var azimuth = 0f    // orientarea telefonului față de nord
     private var bearing = 0f    // direcția destinației față de nord
 
-    private val paintNorth = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#EF5350"); strokeWidth = 8f; strokeCap = Paint.Cap.ROUND
-    }
     private val paintTarget = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#66BB6A"); strokeWidth = 14f; strokeCap = Paint.Cap.ROUND
+        color = Color.parseColor("#66BB6A"); strokeWidth = 18f; strokeCap = Paint.Cap.ROUND
     }
     private val paintCircle = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#333333"); style = Paint.Style.STROKE; strokeWidth = 3f
     }
     private val paintN = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#EF5350"); textSize = 48f; textAlign = Paint.Align.CENTER
+        color = Color.parseColor("#EF5350"); textSize = 36f; textAlign = Paint.Align.CENTER
         isFakeBoldText = true
-    }
-    private val paintCardinal = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#9E9E9E"); textSize = 36f; textAlign = Paint.Align.CENTER
     }
 
     fun setAngles(az: Float, bear: Float) {
@@ -171,25 +182,16 @@ class CompassView @JvmOverloads constructor(
 
         canvas.drawCircle(cx, cy, r, paintCircle)
 
-        // Săgeată nord (roșu) - subțire, doar pentru referință
-        drawArrow(canvas, cx, cy, r * 0.6f, -azimuth, paintNorth)
-
-        // Săgeată destinație (verde) - principal, mai groasă și mai lungă
+        // O singura sageata: spre destinatie (verde, mare, vizibila)
         val targetAngle = bearing - azimuth
-        drawArrow(canvas, cx, cy, r * 0.85f, targetAngle, paintTarget)
+        drawArrow(canvas, cx, cy, r * 0.9f, targetAngle, paintTarget)
 
-        // Cardinale rotative — se rotesc cu telefonul ca să arate nordul real
-        drawCardinal(canvas, cx, cy, r + 30, -azimuth, "N", paintN)
-        drawCardinal(canvas, cx, cy, r + 30, -azimuth + 90f, "E", paintCardinal)
-        drawCardinal(canvas, cx, cy, r + 30, -azimuth + 180f, "S", paintCardinal)
-        drawCardinal(canvas, cx, cy, r + 30, -azimuth + 270f, "V", paintCardinal)
-    }
-
-    private fun drawCardinal(canvas: Canvas, cx: Float, cy: Float, rad: Float, angleDeg: Float, text: String, paint: Paint) {
-        val a = Math.toRadians(angleDeg.toDouble())
-        val px = cx + rad * sin(a).toFloat()
-        val py = cy - rad * cos(a).toFloat() + (paint.textSize / 3)  // vertical centering
-        canvas.drawText(text, px, py, paint)
+        // Litera "N" mica, in afara cercului, la pozitia nordului real
+        // Util pentru a verifica ca senzorul de orientare functioneaza.
+        val a = Math.toRadians((-azimuth).toDouble())
+        val px = cx + (r + 35) * sin(a).toFloat()
+        val py = cy - (r + 35) * cos(a).toFloat() + 12
+        canvas.drawText("N", px, py, paintN)
     }
 
     private fun drawArrow(canvas: Canvas, cx: Float, cy: Float, len: Float, angleDeg: Float, paint: Paint) {
