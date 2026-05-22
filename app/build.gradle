@@ -11,8 +11,8 @@ android {
         applicationId "com.example.logger"
         minSdk 26
         targetSdk 35
-        versionCode 8
-        versionName "1.0.8"
+        versionCode 9
+        versionName "1.0.9"
 
         // Web Client ID din Google Cloud Console (acelasi cu echo.noze.ro)
         // Folosit de Credential Manager pentru Sign in with Google
@@ -24,9 +24,23 @@ android {
         buildConfig true  // necesar pt BuildConfig.VERSION_NAME + GOOGLE_WEB_CLIENT_ID
     }
 
+    // Keystore stabil — APK semnat consistent => upgrade in-place fara dezinstall
+    signingConfigs {
+        debug {
+            storeFile file("bioecho-debug.keystore")
+            storePassword "bioecho2026"
+            keyAlias "bioecho"
+            keyPassword "bioecho2026"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
+            signingConfig signingConfigs.debug  // pentru distribuire APK fără Play Store
         }
     }
 

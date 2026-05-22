@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- BioEcho icon — silueta liliac stilizata + 3 unde sonore (echolocation) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Trei arce concentrice (unde sonore) — pleaca de jos-stanga, in dreapta-sus -->
+    <path
+        android:pathData="M 30,68 A 25,25 0 0 1 55,43"
+        android:strokeWidth="4"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"/>
+    <path
+        android:pathData="M 30,68 A 35,35 0 0 1 65,33"
+        android:strokeWidth="4"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.7"
+        android:fillColor="#00000000"/>
+    <path
+        android:pathData="M 30,68 A 45,45 0 0 1 75,23"
+        android:strokeWidth="4"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.45"
+        android:fillColor="#00000000"/>
+
+    <!-- Punct mic (sursa undei) -->
+    <path
+        android:pathData="M 30,68 m -5,0 a 5,5 0 1,0 10,0 a 5,5 0 1,0 -10,0"
+        android:fillColor="#FFFFFF"/>
+</vector>
