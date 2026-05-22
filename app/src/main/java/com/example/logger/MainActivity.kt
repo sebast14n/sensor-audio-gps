@@ -25,6 +25,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnUpload: Button
     private lateinit var btnSetToken: Button
     private lateinit var btnQrAuth: Button
+    private lateinit var btnGoogleLogin: Button
     private lateinit var btnCompass: Button
     private lateinit var tvStatus: TextView
     private lateinit var tvUploadStatus: TextView
@@ -42,11 +43,12 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        btnStartStop  = findViewById(R.id.btnStartStop)
-        btnUpload     = findViewById(R.id.btnUpload)
-        btnSetToken   = findViewById(R.id.btnSetToken)
-        btnQrAuth     = findViewById(R.id.btnQrAuth)
-        btnCompass    = findViewById(R.id.btnCompass)
+        btnStartStop     = findViewById(R.id.btnStartStop)
+        btnUpload        = findViewById(R.id.btnUpload)
+        btnSetToken      = findViewById(R.id.btnSetToken)
+        btnQrAuth        = findViewById(R.id.btnQrAuth)
+        btnGoogleLogin   = findViewById(R.id.btnGoogleLogin)
+        btnCompass       = findViewById(R.id.btnCompass)
         tvStatus      = findViewById(R.id.tvStatus)
         tvUploadStatus = findViewById(R.id.tvUploadStatus)
         tvPath        = findViewById(R.id.tvPath)
@@ -85,6 +87,19 @@ class MainActivity : AppCompatActivity() {
         btnUpload.setOnClickListener { showSessionPicker() }
         btnSetToken.setOnClickListener { showTokenDialog() }
         btnQrAuth.setOnClickListener { startActivityForResult(Intent(this, QrScanActivity::class.java), 300) }
+        btnGoogleLogin.setOnClickListener {
+            tvUploadStatus.text = "Se conectează la Google..."
+            GoogleLogin.signIn(this,
+                onSuccess = { email, name ->
+                    tvUploadStatus.text = "✓ Logat ca $email" + (if (name.isNotBlank()) " ($name)" else "")
+                    Toast.makeText(this, "Bine ai venit, ${name.ifBlank { email }}!", Toast.LENGTH_LONG).show()
+                },
+                onError = { msg ->
+                    tvUploadStatus.text = "⚠ Login Google eșuat: $msg"
+                    Toast.makeText(this, "Login Google: $msg", Toast.LENGTH_LONG).show()
+                }
+            )
+        }
         btnCompass.setOnClickListener {
             // Deschide lista de POI-uri (sincronizate de pe BioEcho web).
             // Permite si destinatie manuala ad-hoc din lista.

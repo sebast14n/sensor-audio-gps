@@ -11,12 +11,17 @@ android {
         applicationId "com.example.logger"
         minSdk 26
         targetSdk 35
-        versionCode 7
-        versionName "1.0.7"
+        versionCode 8
+        versionName "1.0.8"
+
+        // Web Client ID din Google Cloud Console (acelasi cu echo.noze.ro)
+        // Folosit de Credential Manager pentru Sign in with Google
+        buildConfigField "String", "GOOGLE_WEB_CLIENT_ID",
+            "\"784597486644-50hoi1h5rsad4ano9cuf93mf9gtki365.apps.googleusercontent.com\""
     }
 
     buildFeatures {
-        buildConfig true  // necesar pt BuildConfig.VERSION_NAME folosit de UpdateChecker
+        buildConfig true  // necesar pt BuildConfig.VERSION_NAME + GOOGLE_WEB_CLIENT_ID
     }
 
     buildTypes {
@@ -43,4 +48,13 @@ dependencies {
     implementation "androidx.camera:camera-lifecycle:1.3.1"
     implementation "androidx.camera:camera-view:1.3.1"
     implementation 'org.osmdroid:osmdroid-android:6.1.17'
+
+    // Sign in with Google — Credential Manager (modern API, fara SHA-1 register)
+    implementation 'androidx.credentials:credentials:1.3.0'
+    implementation 'androidx.credentials:credentials-play-services-auth:1.3.0'
+    implementation 'com.google.android.libraries.identity.googleid:googleid:1.1.1'
+
+    // Coroutines pentru apel suspending Credential Manager
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
 }
