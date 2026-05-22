@@ -93,6 +93,9 @@ class MainActivity : AppCompatActivity() {
 
         // Solicita exceptare de la battery optimization la prima rulare
         requestBatteryOptimizationExemption()
+
+        // Verifica daca exista o versiune mai noua (silentios la esec)
+        UpdateChecker.checkAsync(this)
     }
 
     override fun onResume() {
