@@ -22,6 +22,11 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+
       - name: Install Gradle 8.9
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip -O /tmp/gradle.zip
@@ -35,7 +40,11 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME}"
           [ "$GITHUB_REF_TYPE" = "branch" ] && VERSION="${GITHUB_SHA::7}"
+          echo "Looking for APK..."
+          find . -name "*.apk" -type f 2>/dev/null
+          ls -la app/build/outputs/apk/debug/ 2>&1 || echo "Debug dir missing"
           cp app/build/outputs/apk/debug/app-debug.apk "bioecho-${VERSION}.apk"
+          ls -la "bioecho-${VERSION}.apk"
           echo "APK_NAME=bioecho-${VERSION}.apk" >> $GITHUB_ENV
 
       - name: Upload artifact (build pe branch)
