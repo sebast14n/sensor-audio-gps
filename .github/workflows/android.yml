@@ -3,7 +3,11 @@ name: Build APK
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
+
+permissions:
+  contents: write  # necesar pentru a crea GitHub Releases la tag push
 
 jobs:
   build:
@@ -27,8 +31,34 @@ jobs:
       - name: Build Debug APK
         run: gradle assembleDebug
 
-      - name: Upload APK
+      - name: Rename APK cu versiunea
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          [ "$GITHUB_REF_TYPE" = "branch" ] && VERSION="${GITHUB_SHA::7}"
+          cp app/build/outputs/apk/debug/app-debug.apk "bioecho-${VERSION}.apk"
+          echo "APK_NAME=bioecho-${VERSION}.apk" >> $GITHUB_ENV
+
+      - name: Upload artifact (build pe branch)
+        if: github.ref_type == 'branch'
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: ${{ env.APK_NAME }}
+          path: ${{ env.APK_NAME }}
+          retention-days: 30
+
+      - name: Create GitHub Release (la tag push v*)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.APK_NAME }}
+          generate_release_notes: true
+          name: BioEcho ${{ github.ref_name }}
+          body: |
+            APK Android (debug build) pentru BioEcho.
+
+            **Instalare**:
+            1. Descarcă `bioecho-${{ github.ref_name }}.apk`
+            2. Pe Android, deschide fișierul descărcat
+            3. Permite instalarea din această sursă dacă te întreabă
+
+            Build: `${{ github.sha }}` din branch `${{ github.event.base_ref }}`

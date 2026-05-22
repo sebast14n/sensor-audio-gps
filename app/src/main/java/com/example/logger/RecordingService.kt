@@ -7,6 +7,8 @@ import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Bundle
@@ -33,11 +35,14 @@ class RecordingService : Service() {
     private var sessionDir: File? = null
     private var segmentTimer: Timer? = null
     private var segmentIndex = 0
-    private val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+    private val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).also {
+        it.timeZone = TimeZone.getTimeZone("UTC")
+    }
 
     private var staticLat: Double? = null
     private var staticLon: Double? = null
     private var gpsAvailable = false
+    private var isFixedPoint = false  // true = opreste GPS dupa primul fix bun
 
     // WakeLock — previne adormirea CPU-ului cand ecranul e inactiv
     private var wakeLock: PowerManager.WakeLock? = null
@@ -55,6 +60,7 @@ class RecordingService : Service() {
         val lat = intent?.getDoubleExtra("static_lat", Double.NaN) ?: Double.NaN
         val lon = intent?.getDoubleExtra("static_lon", Double.NaN) ?: Double.NaN
         if (!lat.isNaN() && !lon.isNaN()) { staticLat = lat; staticLon = lon }
+        isFixedPoint = intent?.getBooleanExtra("fixed_point", false) ?: false
 
         // Android 14+ cere declararea explicita a tipului de serviciu
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -121,14 +127,56 @@ class RecordingService : Service() {
             @Suppress("DEPRECATION") MediaRecorder()
 
         recorder?.apply {
-            setAudioSource(MediaRecorder.AudioSource.MIC)
+            // UNPROCESSED = sunet brut fara AGC/noise-suppression Android (ideal pt. bioacustica)
+            // Fallback la MIC daca dispozitivul nu suporta UNPROCESSED
+            val audioSource = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                MediaRecorder.AudioSource.UNPROCESSED
+            } else {
+                MediaRecorder.AudioSource.MIC
+            }
+            setAudioSource(audioSource)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            setAudioSamplingRate(44100)
-            setAudioEncodingBitRate(128000)
+            setAudioSamplingRate(48000)   // rata nativa BirdNET
+            setAudioEncodingBitRate(256000)
+            setAudioChannels(1)           // mono explicit
             setOutputFile(file.absolutePath)
-            try { prepare(); start() } catch (e: Exception) { e.printStackTrace() }
+            try {
+                prepare(); start()
+                logAudioDevice()
+            } catch (e: Exception) {
+                // UNPROCESSED nesustinut — reincearca cu MIC
+                if (audioSource == MediaRecorder.AudioSource.UNPROCESSED) {
+                    reset()
+                    setAudioSource(MediaRecorder.AudioSource.MIC)
+                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                    setAudioSamplingRate(48000)
+                    setAudioEncodingBitRate(256000)
+                    setAudioChannels(1)
+                    setOutputFile(file.absolutePath)
+                    try { prepare(); start() } catch (e2: Exception) { e2.printStackTrace() }
+                } else {
+                    e.printStackTrace()
+                }
+            }
         }
+    }
+
+    private fun logAudioDevice() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val activeInput = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
+            .firstOrNull { it.isSink.not() }
+        val label = when (activeInput?.type) {
+            AudioDeviceInfo.TYPE_BUILTIN_MIC       -> "microfon intern"
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+            AudioDeviceInfo.TYPE_USB_DEVICE        -> "microfon USB-C"
+            AudioDeviceInfo.TYPE_WIRED_HEADSET     -> "microfon jack 3.5mm"
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO     -> "microfon Bluetooth"
+            else -> activeInput?.productName?.toString() ?: "necunoscut"
+        }
+        updateNotification("🔴 Audio + GPS · $label · 48kHz")
     }
 
     private fun stopAudio() {
@@ -145,13 +193,24 @@ class RecordingService : Service() {
             return
         }
 
+        // Senzor fix: GPS activ pana la primul fix bun (precizie < 20m), apoi oprit
+        // Transect: GPS activ tot timpul, update la 30s / 20m (suficient pentru deplasare pedestriana)
+        val gpsIntervalMs = if (isFixedPoint) 3_000L else 30_000L
+        val gpsMinDistance = if (isFixedPoint) 0f else 20f
+
         locationListener = object : LocationListener {
             override fun onLocationChanged(loc: Location) {
+                writeGpxPoint(loc)
                 if (!gpsAvailable) {
                     gpsAvailable = true
+                }
+                if (isFixedPoint && loc.hasAccuracy() && loc.accuracy < 20f) {
+                    // Fix bun obtinut — oprim GPS-ul, economisim bateria
+                    locationManager?.removeUpdates(this)
+                    updateNotification("🔴 Audio · fix GPS ±${loc.accuracy.toInt()}m · GPS oprit")
+                } else if (!isFixedPoint) {
                     updateNotification("🔴 Audio + GPS activ")
                 }
-                writeGpxPoint(loc)
             }
             @Deprecated("Deprecated")
             override fun onStatusChanged(p: String?, s: Int, e: Bundle?) {}
@@ -163,7 +222,7 @@ class RecordingService : Service() {
 
         try {
             locationManager?.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER, 5_000L, 5f, locationListener!!
+                LocationManager.GPS_PROVIDER, gpsIntervalMs, gpsMinDistance, locationListener!!
             )
         } catch (e: SecurityException) { e.printStackTrace() }
     }
