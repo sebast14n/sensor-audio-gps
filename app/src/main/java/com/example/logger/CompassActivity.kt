@@ -120,7 +120,19 @@ class CompassActivity : AppCompatActivity(), SensorEventListener {
 
         val relBearing = ((bearingToTarget - currentAzimuth + 360) % 360)
         tvDistance.text = distText
-        tvBearing.text  = "Direcție: %.0f° · Față de nord: %.0f°".format(relBearing, bearingToTarget)
+        // Indicație direcțională în limbaj natural
+        val hint = when {
+            relBearing < 15 || relBearing > 345 -> "↑ DREPT ÎNAINTE"
+            relBearing in 15.0..75.0   -> "↗ dreapta-față"
+            relBearing in 75.0..105.0  -> "→ DREAPTA"
+            relBearing in 105.0..165.0 -> "↘ dreapta-spate"
+            relBearing in 165.0..195.0 -> "↓ ÎN SPATE"
+            relBearing in 195.0..255.0 -> "↙ stânga-spate"
+            relBearing in 255.0..285.0 -> "← STÂNGA"
+            relBearing in 285.0..345.0 -> "↖ stânga-față"
+            else -> ""
+        }
+        tvBearing.text = "$hint  ·  ${relBearing.toInt()}° față de privirea ta"
         compassView.setAngles(currentAzimuth, bearingToTarget)
     }
 }
@@ -136,13 +148,17 @@ class CompassView @JvmOverloads constructor(
         color = Color.parseColor("#EF5350"); strokeWidth = 8f; strokeCap = Paint.Cap.ROUND
     }
     private val paintTarget = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#66BB6A"); strokeWidth = 12f; strokeCap = Paint.Cap.ROUND
+        color = Color.parseColor("#66BB6A"); strokeWidth = 14f; strokeCap = Paint.Cap.ROUND
     }
     private val paintCircle = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#333333"); style = Paint.Style.STROKE; strokeWidth = 3f
     }
     private val paintN = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE; textSize = 40f; textAlign = Paint.Align.CENTER
+        color = Color.parseColor("#EF5350"); textSize = 48f; textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+    private val paintCardinal = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#9E9E9E"); textSize = 36f; textAlign = Paint.Align.CENTER
     }
 
     fun setAngles(az: Float, bear: Float) {
@@ -155,15 +171,25 @@ class CompassView @JvmOverloads constructor(
 
         canvas.drawCircle(cx, cy, r, paintCircle)
 
-        // Săgeată nord (roșu)
-        drawArrow(canvas, cx, cy, r * 0.8f, -azimuth, paintNorth)
+        // Săgeată nord (roșu) - subțire, doar pentru referință
+        drawArrow(canvas, cx, cy, r * 0.6f, -azimuth, paintNorth)
 
-        // Săgeată destinație (verde)
+        // Săgeată destinație (verde) - principal, mai groasă și mai lungă
         val targetAngle = bearing - azimuth
-        drawArrow(canvas, cx, cy, r * 0.7f, targetAngle, paintTarget)
+        drawArrow(canvas, cx, cy, r * 0.85f, targetAngle, paintTarget)
 
-        // "N" fixat sus
-        canvas.drawText("N", cx, cy - r - 10, paintN)
+        // Cardinale rotative — se rotesc cu telefonul ca să arate nordul real
+        drawCardinal(canvas, cx, cy, r + 30, -azimuth, "N", paintN)
+        drawCardinal(canvas, cx, cy, r + 30, -azimuth + 90f, "E", paintCardinal)
+        drawCardinal(canvas, cx, cy, r + 30, -azimuth + 180f, "S", paintCardinal)
+        drawCardinal(canvas, cx, cy, r + 30, -azimuth + 270f, "V", paintCardinal)
+    }
+
+    private fun drawCardinal(canvas: Canvas, cx: Float, cy: Float, rad: Float, angleDeg: Float, text: String, paint: Paint) {
+        val a = Math.toRadians(angleDeg.toDouble())
+        val px = cx + rad * sin(a).toFloat()
+        val py = cy - rad * cos(a).toFloat() + (paint.textSize / 3)  // vertical centering
+        canvas.drawText(text, px, py, paint)
     }
 
     private fun drawArrow(canvas: Canvas, cx: Float, cy: Float, len: Float, angleDeg: Float, paint: Paint) {

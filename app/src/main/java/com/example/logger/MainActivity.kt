@@ -174,25 +174,56 @@ class MainActivity : AppCompatActivity() {
     private fun showSessionPicker() {
         val sessions = uploadManager.getLocalSessions()
         if (sessions.isEmpty()) {
-            tvUploadStatus.text = "Nicio sesiune locală găsită."
+            Toast.makeText(this, "Nicio sesiune locală găsită — pornește o înregistrare mai întâi", Toast.LENGTH_LONG).show()
+            tvUploadStatus.text = "Nicio sesiune locală."
             return
         }
 
-        val names = sessions.map { it.name }.toTypedArray()
+        // Format: nume + data + nr fișiere + size MB
+        val labels = sessions.map { dir ->
+            val ts = dir.name.removePrefix("session_")
+            val pretty = formatTimestamp(ts)
+            val files = dir.listFiles()?.filter { it.name.endsWith(".m4a") || it.name.endsWith(".wav") } ?: emptyList()
+            val totalMb = files.sumOf { it.length() } / 1024.0 / 1024.0
+            "$pretty\n${files.size} fișiere · %.1f MB".format(totalMb)
+        }.toTypedArray()
+
         AlertDialog.Builder(this)
-            .setTitle("Selectează sesiunea de uplodat")
-            .setItems(names) { _, idx -> doUpload(sessions[idx]) }
+            .setTitle("Sesiuni locale (${sessions.size})")
+            .setItems(labels) { _, idx -> doUpload(sessions[idx]) }
             .setNegativeButton("Anulează", null)
             .show()
     }
 
+    private fun formatTimestamp(ts: String): String {
+        // session_2026-05-22_14-30-00 -> "22 mai 2026, 14:30"
+        return try {
+            val parts = ts.split("_")
+            if (parts.size >= 2) {
+                val date = parts[0]
+                val time = parts[1].replace("-", ":")
+                "$date  $time"
+            } else ts
+        } catch (e: Exception) { ts }
+    }
+
     private fun doUpload(sessionDir: File) {
         if (!isWifiConnected()) {
-            tvUploadStatus.text = "⚠ Upload disponibil doar pe WiFi"
+            // Permite cu confirmare pe cellular (poate fi mare consum date)
+            AlertDialog.Builder(this)
+                .setTitle("⚠ Nu ești pe WiFi")
+                .setMessage("Upload pe date mobile poate consuma volum mare. Continui oricum?")
+                .setPositiveButton("Da, upload pe mobile") { _, _ -> performUpload(sessionDir) }
+                .setNegativeButton("Anulează", null)
+                .show()
             return
         }
+        performUpload(sessionDir)
+    }
+
+    private fun performUpload(sessionDir: File) {
         if (uploadManager.jwtToken.isNullOrBlank()) {
-            showTokenDialog { doUpload(sessionDir) }
+            showTokenDialog { performUpload(sessionDir) }
             return
         }
 
