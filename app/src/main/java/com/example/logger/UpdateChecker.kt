@@ -121,8 +121,10 @@ object UpdateChecker {
                 }
                 if (mandatory) append("\n\n⚠ Actualizare obligatorie.")
             })
-            .setPositiveButton("Descarcă") { _, _ ->
-                ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
+            .setPositiveButton(if (ctx.let { AppUpdater.isDeviceOwner(it) }) "Actualizează automat" else "Actualizează") { _, _ ->
+                val act = ctx as? AppCompatActivity
+                if (act != null) AppUpdater.downloadAndInstall(act, apkUrl)
+                else ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))  // fallback
             }
             .setNegativeButton(if (mandatory) "Ieși" else "Mai târziu") { _, _ ->
                 if (mandatory && ctx is AppCompatActivity) ctx.finishAffinity()
