@@ -26,6 +26,7 @@ class RecordingService : Service() {
         private const val CHANNEL_ID = "recording_channel"
         private const val NOTIF_ID   = 1
         private const val SEGMENT_MS = 10 * 60 * 1000L
+        private const val WINDOW_CHECK_MS = 60_000L   // verificare fereastra orara la 60s
     }
 
     private var recorder: MediaRecorder? = null
@@ -34,6 +35,7 @@ class RecordingService : Service() {
     private var gpxFile: File? = null
     private var sessionDir: File? = null
     private var segmentTimer: Timer? = null
+    private var windowTimer: Timer? = null
     private var segmentIndex = 0
     private val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).also {
         it.timeZone = TimeZone.getTimeZone("UTC")
@@ -44,8 +46,16 @@ class RecordingService : Service() {
     private var gpsAvailable = false
     private var isFixedPoint = false  // true = opreste GPS dupa primul fix bun
 
-    // WakeLock — previne adormirea CPU-ului cand ecranul e inactiv
+    // Mod programat: inregistreaza DOAR in fereastra nocturna (apus-buffer .. rasarit+buffer)
+    private var scheduled = false
+    private var recordingActive = false
+    // ultima pozitie cunoscuta (pt. calculul ferestrei rasarit/apus)
+    private var lastLat: Double? = null
+    private var lastLon: Double? = null
+
+    // WakeLock — tinut DOAR cat timp inregistram efectiv (nu permanent)
     private var wakeLock: PowerManager.WakeLock? = null
+    private var antiTheft: AntiTheftMonitor? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -53,14 +63,16 @@ class RecordingService : Service() {
         createChannel()
         wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SensorLogger::RecordingWakeLock")
-        wakeLock?.acquire()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val lat = intent?.getDoubleExtra("static_lat", Double.NaN) ?: Double.NaN
         val lon = intent?.getDoubleExtra("static_lon", Double.NaN) ?: Double.NaN
-        if (!lat.isNaN() && !lon.isNaN()) { staticLat = lat; staticLon = lon }
+        if (!lat.isNaN() && !lon.isNaN()) {
+            staticLat = lat; staticLon = lon; lastLat = lat; lastLon = lon
+        }
         isFixedPoint = intent?.getBooleanExtra("fixed_point", false) ?: false
+        scheduled = intent?.getBooleanExtra("scheduled", false) ?: false
 
         // Android 14+ cere declararea explicita a tipului de serviciu
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -80,9 +92,10 @@ class RecordingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
-        segmentTimer?.cancel()
-        stopAudio()
+        windowTimer?.cancel()
+        pauseRecording()
         closeGpx()
+        antiTheft?.stop()
         locationListener?.let { locationManager?.removeUpdates(it) }
         if (wakeLock?.isHeld == true) wakeLock?.release()
     }
@@ -103,17 +116,57 @@ class RecordingService : Service() {
 
         if (staticLat != null && staticLon != null) {
             writeStaticPoint(staticLat!!, staticLon!!)
-            updateNotification("Audio + locație statică (${"%.4f".format(staticLat)}, ${"%.4f".format(staticLon)})")
         } else {
             startGps()
         }
 
-        startAudioSegment()
+        // Anti-furt: monitor miscare + baterie (non-fatal daca esueaza)
+        try {
+            antiTheft = AntiTheftMonitor(this) { lastLat ?: staticLat }
+                .also { it.locationLon = { lastLon ?: staticLon }; it.start() }
+        } catch (_: Exception) {}
 
+        if (scheduled) {
+            // evalueaza imediat + verifica periodic fereastra
+            evaluateWindow()
+            windowTimer = Timer()
+            windowTimer?.scheduleAtFixedRate(object : TimerTask() {
+                override fun run() { evaluateWindow() }
+            }, WINDOW_CHECK_MS, WINDOW_CHECK_MS)
+        } else {
+            resumeRecording()
+        }
+    }
+
+    /** In mod programat: porneste/opreste inregistrarea dupa fereastra nocturna. */
+    private fun evaluateWindow() {
+        val active = RecordWindow.isActiveNow(lastLat ?: staticLat, lastLon ?: staticLon)
+        if (active && !recordingActive) {
+            resumeRecording()
+        } else if (!active && recordingActive) {
+            pauseRecording()
+            updateNotification("⏸ In afara ferestrei — astept apusul (economie baterie)")
+        }
+    }
+
+    /** Porneste inregistrarea audio + tine wakelock-ul. */
+    private fun resumeRecording() {
+        if (recordingActive) return
+        recordingActive = true
+        if (wakeLock?.isHeld != true) wakeLock?.acquire()
+        startAudioSegment()
         segmentTimer = Timer()
         segmentTimer?.scheduleAtFixedRate(object : TimerTask() {
             override fun run() { stopAudio(); startAudioSegment() }
         }, SEGMENT_MS, SEGMENT_MS)
+    }
+
+    /** Opreste inregistrarea + elibereaza wakelock-ul (economie baterie). */
+    private fun pauseRecording() {
+        recordingActive = false
+        segmentTimer?.cancel(); segmentTimer = null
+        stopAudio()
+        if (wakeLock?.isHeld == true) wakeLock?.release()
     }
 
     private fun startAudioSegment() {
@@ -200,6 +253,7 @@ class RecordingService : Service() {
 
         locationListener = object : LocationListener {
             override fun onLocationChanged(loc: Location) {
+                lastLat = loc.latitude; lastLon = loc.longitude
                 writeGpxPoint(loc)
                 if (!gpsAvailable) {
                     gpsAvailable = true

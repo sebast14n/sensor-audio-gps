@@ -525,12 +525,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startRecording(staticLat: Double?, staticLon: Double?) {
+        // Mod programat (inregistrare doar in fereastra nocturna + anti-furt) implicit
+        // pentru senzor lasat nesupravegheat (punct fix). Transect = continuu.
+        // Se poate dezactiva cu pref "schedule_enabled".
+        val scheduled = isFixedPoint &&
+            getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("schedule_enabled", true)
         val i = Intent(this, RecordingService::class.java).apply {
             if (staticLat != null && staticLon != null) {
                 putExtra("static_lat", staticLat)
                 putExtra("static_lon", staticLon)
             }
             putExtra("fixed_point", isFixedPoint)
+            putExtra("scheduled", scheduled)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i)
         else startService(i)
