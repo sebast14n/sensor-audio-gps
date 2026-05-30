@@ -81,9 +81,9 @@ class PoisListActivity : AppCompatActivity() {
             setOnClickListener { loadPois() }
         }
         btnAddManual = Button(this).apply {
-            text = "+ Manual"
+            text = "➕ Adaugă punct"
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            setOnClickListener { showManualDialog() }
+            setOnClickListener { openMapPicker() }
         }
         btnRow.addView(btnRefresh)
         btnRow.addView(btnAddManual)
@@ -247,6 +247,43 @@ class PoisListActivity : AppCompatActivity() {
     }
 
     private fun Double.format(decimals: Int) = "%.${decimals}f".format(this)
+
+    /** Adaugare punct: metoda PRINCIPALA = selectie pe harta (satelit, offline din cache). */
+    private fun openMapPicker() {
+        startActivityForResult(
+            Intent(this, MapActivity::class.java).putExtra("pick_mode", true), 400)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 400 && resultCode == RESULT_OK && data != null) {
+            if (data.getBooleanExtra("manual", false)) {
+                showManualDialog()                       // rezerva: fara harta -> coordonate manuale
+            } else {
+                val lat = data.getDoubleExtra("lat", Double.NaN)
+                val lon = data.getDoubleExtra("lon", Double.NaN)
+                if (!lat.isNaN() && !lon.isNaN()) askNameAndNavigate(lat, lon)
+            }
+        }
+    }
+
+    private fun askNameAndNavigate(lat: Double, lon: Double) {
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 24, 48, 0) }
+        val etName = EditText(this).apply { hint = "Nume (ex: Cabană, P3)" }
+        layout.addView(etName)
+        AlertDialog.Builder(this)
+            .setTitle("Punct selectat pe hartă")
+            .setMessage("📍 %.5f, %.5f".format(lat, lon))
+            .setView(layout)
+            .setPositiveButton("Navighează") { _, _ ->
+                startActivity(Intent(this, CompassActivity::class.java).apply {
+                    putExtra("lat", lat); putExtra("lon", lon)
+                    putExtra("name", etName.text.toString().ifBlank { "Destinație" })
+                })
+            }
+            .setNegativeButton("Anulează", null)
+            .show()
+    }
 
     private fun showManualDialog() {
         val layout = LinearLayout(this).apply {

@@ -3,13 +3,22 @@ package com.example.logger
 import android.app.ProgressDialog
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.location.Location
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
+import org.osmdroid.views.overlay.Polyline
+import java.io.File
 import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.tileprovider.tilesource.TileSourcePolicy
 import org.osmdroid.util.BoundingBox
@@ -36,6 +45,15 @@ class MapActivity : AppCompatActivity() {
     private var destLon = 0.0
     private var destName = "Destinație"
     private var lastLocation: Location? = null
+    private var pickMode = false
+    private var trackMode = false
+    private var trackLine: Polyline? = null
+    private val trackHandler = Handler(Looper.getMainLooper())
+    private val trackRefresh = object : Runnable {
+        override fun run() {
+            if (trackMode) { drawTrack(); trackHandler.postDelayed(this, 4000) }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,6 +63,8 @@ class MapActivity : AppCompatActivity() {
         destLat = intent.getDoubleExtra("lat", 0.0)
         destLon = intent.getDoubleExtra("lon", 0.0)
         destName = intent.getStringExtra("name") ?: "Destinație"
+        pickMode = intent.getBooleanExtra("pick_mode", false)
+        trackMode = intent.getBooleanExtra("track_mode", false)
 
         mapView = findViewById(R.id.mapView)
         tvDistance = findViewById(R.id.tvDistance)
@@ -53,17 +73,123 @@ class MapActivity : AppCompatActivity() {
 
         setupMap()
         setupLocationOverlay()
-        addDestinationMarker()
 
-        btnCompassFromMap.setOnClickListener {
-            startActivity(Intent(this, CompassActivity::class.java).apply {
-                putExtra("lat", destLat)
-                putExtra("lon", destLon)
-                putExtra("name", destName)
+        if (pickMode) {
+            findViewById<View>(R.id.pickCrosshair).visibility = View.VISIBLE
+            findViewById<View>(R.id.pickHint).visibility = View.VISIBLE
+            btnCompassFromMap.text = "✓ Confirmă"
+            btnPrecache.text = "✎ Manual"
+            btnCompassFromMap.setOnClickListener { confirmPick() }
+            btnPrecache.setOnClickListener { returnManual() }
+            mapView.addMapListener(object : MapListener {
+                override fun onScroll(event: ScrollEvent?): Boolean { updateCenterLabel(); return false }
+                override fun onZoom(event: ZoomEvent?): Boolean { updateCenterLabel(); return false }
             })
+            updateCenterLabel()
+        } else if (trackMode) {
+            btnCompassFromMap.text = "📍 Eu"
+            btnPrecache.text = "🛰 Cache 5km"
+            btnCompassFromMap.setOnClickListener {
+                (myLocationOverlay.myLocation ?: lastLocation?.let { GeoPoint(it.latitude, it.longitude) })
+                    ?.let { mapView.controller.animateTo(it) }
+            }
+            btnPrecache.setOnClickListener { precache5km() }
+            drawTrack()
+            trackHandler.postDelayed(trackRefresh, 4000)
+            mapView.postDelayed({ precache5km() }, 2500)   // cache 5x5km auto la deschidere (de obicei e net)
+        } else {
+            addDestinationMarker()
+            btnCompassFromMap.setOnClickListener {
+                startActivity(Intent(this, CompassActivity::class.java).apply {
+                    putExtra("lat", destLat); putExtra("lon", destLon); putExtra("name", destName)
+                })
+            }
+            btnPrecache.setOnClickListener { precacheTiles() }
         }
+    }
 
-        btnPrecache.setOnClickListener { precacheTiles() }
+    /** Citeste GPX-ul sesiunii curente si deseneaza traseul (linie). Reapelat la refresh. */
+    private fun drawTrack() {
+        val path = RecordingService.currentGpxPath ?: run {
+            tvDistance.text = "🚶 Traseu — fara sesiune activa"; return
+        }
+        val pts = parseGpx(path)
+        trackLine?.let { mapView.overlays.remove(it) }
+        if (pts.isNotEmpty()) {
+            val line = Polyline(mapView).apply {
+                setPoints(pts)
+                outlinePaint.color = Color.parseColor("#FF1744")
+                outlinePaint.strokeWidth = 8f
+            }
+            mapView.overlays.add(line)
+            trackLine = line
+            var len = 0.0
+            for (i in 1 until pts.size) {
+                val r = FloatArray(1)
+                Location.distanceBetween(pts[i-1].latitude, pts[i-1].longitude,
+                    pts[i].latitude, pts[i].longitude, r)
+                len += r[0]
+            }
+            val lenStr = if (len >= 1000) "%.2f km".format(len / 1000) else "%.0f m".format(len)
+            tvDistance.text = "🚶 Traseu: $lenStr · ${pts.size} pct"
+        }
+        mapView.invalidate()
+    }
+
+    private fun parseGpx(path: String): List<GeoPoint> {
+        val pts = mutableListOf<GeoPoint>()
+        try {
+            val txt = File(path).readText()
+            for (m in Regex("""<trkpt\b([^>]*)>""").findAll(txt)) {
+                val a = m.groupValues[1]
+                val lat = Regex("""lat="([-0-9.]+)"""").find(a)?.groupValues?.get(1)?.toDoubleOrNull()
+                val lon = Regex("""lon="([-0-9.]+)"""").find(a)?.groupValues?.get(1)?.toDoubleOrNull()
+                if (lat != null && lon != null) pts.add(GeoPoint(lat, lon))
+            }
+        } catch (e: Exception) {}
+        return pts
+    }
+
+    @Suppress("DEPRECATION")
+    private fun precache5km() {
+        val loc = myLocationOverlay.myLocation
+            ?: lastLocation?.let { GeoPoint(it.latitude, it.longitude) }
+        if (loc == null) { Toast.makeText(this, "Aștept locația GPS...", Toast.LENGTH_SHORT).show(); return }
+        val delta = 0.025   // ~2.5 km -> casuta 5x5 km
+        val box = BoundingBox(loc.latitude + delta, loc.longitude + delta,
+            loc.latitude - delta, loc.longitude - delta)
+        val cm = CacheManager(mapView)
+        val total = cm.possibleTilesInArea(box, 13, 16)
+        Toast.makeText(this, "Cache satelit 5×5km ($total tiles)...", Toast.LENGTH_SHORT).show()
+        cm.downloadAreaAsync(this, box, 13, 16, object : CacheManager.CacheManagerCallback {
+            override fun onTaskComplete() {
+                runOnUiThread { Toast.makeText(this@MapActivity, "✓ Cache 5km salvat offline", Toast.LENGTH_SHORT).show() }
+            }
+            override fun updateProgress(progress: Int, currentZoomLevel: Int, zoomMin: Int, zoomMax: Int) {}
+            override fun downloadStarted() {}
+            override fun setPossibleTilesInArea(total: Int) {}
+            override fun onTaskFailed(errors: Int) {
+                runOnUiThread { Toast.makeText(this@MapActivity, "⚠ $errors erori cache", Toast.LENGTH_SHORT).show() }
+            }
+        })
+    }
+
+    /** Mod pick: confirma centrul hartii (crucea) ca punct ales. */
+    private fun confirmPick() {
+        val c = mapView.mapCenter
+        setResult(RESULT_OK, Intent().putExtra("lat", c.latitude).putExtra("lon", c.longitude))
+        finish()
+    }
+
+    /** Mod pick: cere introducere manuala (cand harta nu e utila — fara net + fara cache). */
+    private fun returnManual() {
+        setResult(RESULT_OK, Intent().putExtra("manual", true))
+        finish()
+    }
+
+    private fun updateCenterLabel() {
+        val c = mapView.mapCenter
+        tvDistance.text = "📍 %.5f, %.5f".format(c.latitude, c.longitude)
     }
 
     private fun setupMap() {
@@ -143,7 +269,10 @@ class MapActivity : AppCompatActivity() {
         myLocationOverlay.runOnFirstFix {
             runOnUiThread {
                 myLocationOverlay.disableFollowLocation()
-                mapView.controller.setCenter(GeoPoint(destLat, destLon))
+                val ctr = if (pickMode || trackMode) (myLocationOverlay.myLocation ?: GeoPoint(destLat, destLon))
+                          else GeoPoint(destLat, destLon)
+                mapView.controller.setCenter(ctr)
+                if (pickMode) updateCenterLabel()
             }
         }
 
@@ -162,7 +291,7 @@ class MapActivity : AppCompatActivity() {
                 else
                     "%.0f m".format(distM)
                 runOnUiThread {
-                    tvDistance.text = "🎯 $destName — $distStr"
+                    if (!pickMode && !trackMode) tvDistance.text = "🎯 $destName — $distStr"
                 }
             }
         })
@@ -185,16 +314,22 @@ class MapActivity : AppCompatActivity() {
         super.onResume()
         mapView.onResume()
         myLocationOverlay.enableMyLocation()
+        if (trackMode) {
+            trackHandler.removeCallbacks(trackRefresh)
+            trackHandler.post(trackRefresh)
+        }
     }
 
     override fun onPause() {
         super.onPause()
         mapView.onPause()
         myLocationOverlay.disableMyLocation()
+        trackHandler.removeCallbacks(trackRefresh)
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        trackHandler.removeCallbacks(trackRefresh)
         mapView.onDetach()
     }
 }

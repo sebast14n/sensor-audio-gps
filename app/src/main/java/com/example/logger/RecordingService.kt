@@ -23,6 +23,7 @@ class RecordingService : Service() {
 
     companion object {
         var isRunning = false
+        var currentGpxPath: String? = null   // calea GPX a sesiunii curente (pt harta traseu live)
         private const val CHANNEL_ID = "recording_channel"
         private const val NOTIF_ID   = 1
         private const val SEGMENT_MS = 10 * 60 * 1000L
@@ -92,6 +93,7 @@ class RecordingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
+        currentGpxPath = null
         windowTimer?.cancel()
         pauseRecording()
         closeGpx()
@@ -108,6 +110,7 @@ class RecordingService : Service() {
         sessionDir = File(base, "session_$ts").also { it.mkdirs() }
 
         gpxFile = File(sessionDir, "track_$ts.gpx")
+        currentGpxPath = gpxFile?.absolutePath
         gpxFile?.writeText(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
             "<gpx version=\"1.1\" creator=\"SensorLogger\">\n" +

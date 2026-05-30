@@ -25,6 +25,18 @@
         android:textSize="18sp"
         android:textColor="#FFFFFF"
         android:visibility="gone"
+        android:layout_marginBottom="16dp"/>
+
+    <!-- Traseu pe harta: vizibil doar in timpul unui TRANSECT activ -->
+    <Button
+        android:id="@+id/btnTrackMap"
+        android:layout_width="250dp"
+        android:layout_height="52dp"
+        android:text="🗺  TRASEU PE HARTĂ"
+        android:textSize="15sp"
+        android:textColor="#FFFFFF"
+        android:backgroundTint="#00695C"
+        android:visibility="gone"
         android:layout_marginBottom="32dp"/>
 
     <!-- Doua butoane de pornire: vizibile cand NU se inregistreaza -->

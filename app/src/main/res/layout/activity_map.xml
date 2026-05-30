@@ -8,6 +8,30 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"/>
 
+    <!-- Cruce centrala pt selectarea punctului (mod pick) -->
+    <TextView
+        android:id="@+id/pickCrosshair"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="✛"
+        android:textSize="44sp"
+        android:textColor="#FFD600"
+        android:visibility="gone"/>
+
+    <!-- Hint sus (mod pick) -->
+    <TextView
+        android:id="@+id/pickHint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:background="#CC000000"
+        android:padding="10dp"
+        android:text="Mișcă harta — crucea galbenă marchează punctul. Apoi „Confirmă”."
+        android:textColor="#FFFFFF"
+        android:textSize="13sp"
+        android:visibility="gone"/>
+
     <!-- Bottom bar overlay -->
     <LinearLayout
         android:id="@+id/bottomBar"
