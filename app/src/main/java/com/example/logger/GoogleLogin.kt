@@ -7,8 +7,9 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import androidx.lifecycle.lifecycleScope
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import kotlinx.coroutines.Dispatchers
@@ -43,13 +44,14 @@ object GoogleLogin {
         onError: (String) -> Unit,
     ) {
         val credentialManager = CredentialManager.create(activity)
-        val googleIdOption = GetGoogleIdOption.Builder()
-            .setServerClientId(BuildConfig.GOOGLE_WEB_CLIENT_ID)
-            .setFilterByAuthorizedAccounts(false)  // afiseaza orice cont Google de pe telefon
-            .setAutoSelectEnabled(false)
+        // GetSignInWithGoogleOption = fluxul explicit "Sign in with Google" (buton):
+        // arata mereu selectorul de conturi, mai robust decat GetGoogleIdOption la
+        // "No credentials available". Necesita clientul OAuth Android (package + SHA-1)
+        // inregistrat in proiectul Google Cloud, altfel tot da NoCredentialException.
+        val signInOption = GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_WEB_CLIENT_ID)
             .build()
         val request = GetCredentialRequest.Builder()
-            .addCredentialOption(googleIdOption)
+            .addCredentialOption(signInOption)
             .build()
 
         activity.lifecycleScope.launch {
@@ -81,6 +83,10 @@ object GoogleLogin {
                 } else {
                     onError("Credential tip neașteptat")
                 }
+            } catch (e: NoCredentialException) {
+                onError("Niciun cont Google disponibil. Verifica: (1) cont Google adaugat pe " +
+                        "telefon, (2) Google Play Services actualizat, (3) app inregistrata in " +
+                        "Google Cloud (client OAuth Android cu package com.example.logger + SHA-1).")
             } catch (e: GetCredentialException) {
                 onError(e.message ?: e.type)
             } catch (e: Exception) {

@@ -16,14 +16,45 @@
         android:textColor="#FFFFFF"
         android:layout_marginBottom="24dp"/>
 
+    <!-- STOP: vizibil doar in timpul inregistrarii -->
     <Button
         android:id="@+id/btnStartStop"
         android:layout_width="160dp"
         android:layout_height="160dp"
-        android:text="▶  START"
+        android:text="⏹  STOP"
         android:textSize="18sp"
         android:textColor="#FFFFFF"
+        android:visibility="gone"
         android:layout_marginBottom="32dp"/>
+
+    <!-- Doua butoane de pornire: vizibile cand NU se inregistreaza -->
+    <LinearLayout
+        android:id="@+id/startButtonsRow"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:layout_marginBottom="32dp">
+
+        <Button
+            android:id="@+id/btnTransect"
+            android:layout_width="250dp"
+            android:layout_height="68dp"
+            android:text="🚶  TRANSECT"
+            android:textSize="17sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#43A047"
+            android:layout_marginBottom="16dp"/>
+
+        <Button
+            android:id="@+id/btnFixedSensor"
+            android:layout_width="250dp"
+            android:layout_height="68dp"
+            android:text="📍  SENZOR FIX"
+            android:textSize="17sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#1E88E5"/>
+    </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"

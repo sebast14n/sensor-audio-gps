@@ -3,25 +3,35 @@ package com.example.logger
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.location.Location
 import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import java.io.File
+import java.util.Calendar
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var btnStartStop: Button
+    private lateinit var btnTransect: Button
+    private lateinit var btnFixedSensor: Button
+    private lateinit var startButtonsRow: View
     private lateinit var btnUpload: Button
     private lateinit var btnSetToken: Button
     private lateinit var btnQrAuth: Button
@@ -34,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var uploadManager: UploadManager
     private val PERMISSIONS_REQUEST = 100
     private var isFixedPoint = true  // default: senzor fix (GPS oprit dupa primul fix)
+    private var pendingFixed = true  // ce mod a initiat cererea de permisiuni
 
     private val PREFS = "bioecho_prefs"
     private val KEY_MODE_SET = "session_mode_set"
@@ -44,6 +55,9 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         btnStartStop     = findViewById(R.id.btnStartStop)
+        btnTransect      = findViewById(R.id.btnTransect)
+        btnFixedSensor   = findViewById(R.id.btnFixedSensor)
+        startButtonsRow  = findViewById(R.id.startButtonsRow)
         btnUpload        = findViewById(R.id.btnUpload)
         btnSetToken      = findViewById(R.id.btnSetToken)
         btnQrAuth        = findViewById(R.id.btnQrAuth)
@@ -67,22 +81,12 @@ class MainActivity : AppCompatActivity() {
 
         updateUI(RecordingService.isRunning)
 
-        btnStartStop.setOnClickListener {
-            if (RecordingService.isRunning) stopRecording()
-            else {
-                val p = getSharedPreferences(PREFS, MODE_PRIVATE)
-                if (p.getBoolean(KEY_MODE_SET, false)) {
-                    isFixedPoint = p.getBoolean(KEY_MODE_FIXED, true)
-                    if (isFixedPoint) suggestAirplaneMode() else checkPermissionsAndStart()
-                } else {
-                    showSessionTypeDialog()
-                }
-            }
-        }
-        btnStartStop.setOnLongClickListener {
-            resetModeChoice()
-            true
-        }
+        // STOP (vizibil doar in timpul inregistrarii)
+        btnStartStop.setOnClickListener { if (RecordingService.isRunning) stopRecording() }
+
+        // Cele doua moduri de pornire
+        btnTransect.setOnClickListener { beginSession(fixed = false) }
+        btnFixedSensor.setOnClickListener { beginSession(fixed = true) }
 
         btnUpload.setOnClickListener { showSessionPicker() }
         btnSetToken.setOnClickListener { showTokenDialog() }
@@ -162,23 +166,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateUI(recording: Boolean) {
         if (recording) {
-            btnStartStop.text = "⏹  STOP"
+            btnStartStop.visibility = View.VISIBLE
             btnStartStop.setBackgroundColor(0xFFE53935.toInt())
-            tvStatus.text = "🔴  Înregistrare activă"
+            startButtonsRow.visibility = View.GONE
+            tvStatus.text = if (isFixedPoint) "🔴  Senzor fix — activ" else "🔴  Transect — activ"
             btnUpload.isEnabled = false
+            btnCompass.visibility = if (isFixedPoint) View.GONE else View.VISIBLE
         } else {
-            btnStartStop.text = "▶  START"
-            btnStartStop.setBackgroundColor(0xFF43A047.toInt())
-            val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-            if (prefs.getBoolean(KEY_MODE_SET, false)) {
-                val fixed = prefs.getBoolean(KEY_MODE_FIXED, true)
-                tvStatus.text = if (fixed) "📍 Mod: Senzor fix" else "🚶 Mod: Transect"
-                btnCompass.visibility = if (fixed) android.view.View.GONE else android.view.View.VISIBLE
-            } else {
-                tvStatus.text = "⚪  Oprit"
-                btnCompass.visibility = android.view.View.VISIBLE
-            }
+            btnStartStop.visibility = View.GONE
+            startButtonsRow.visibility = View.VISIBLE
+            tvStatus.text = "⚪  Alege modul de operare"
             btnUpload.isEnabled = true
+            btnCompass.visibility = View.VISIBLE
         }
     }
 
@@ -333,26 +332,38 @@ class MainActivity : AppCompatActivity() {
     // Înregistrare
     // -------------------------------------------------------------------------
 
-    private fun checkPermissionsAndStart() {
+    /** Initiaza o sesiune intr-un mod dat (transect/senzor fix): salveaza modul,
+     *  cere permisiunile, apoi continua prin proceedSession(). */
+    private fun beginSession(fixed: Boolean) {
+        if (RecordingService.isRunning) return
+        isFixedPoint = fixed
+        pendingFixed = fixed
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            .putBoolean(KEY_MODE_SET, true)
+            .putBoolean(KEY_MODE_FIXED, fixed)
+            .apply()
         val needed = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.ACCESS_FINE_LOCATION
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             needed.add(Manifest.permission.POST_NOTIFICATIONS)
-
         val missing = needed.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-
-        if (missing.isEmpty()) checkGpsAndStart()
+        if (missing.isEmpty()) proceedSession()
         else ActivityCompat.requestPermissions(this, missing.toTypedArray(), PERMISSIONS_REQUEST)
+    }
+
+    private fun proceedSession() {
+        if (pendingFixed) prepareFixedSensor()   // locatie -> program -> baterie -> start
+        else checkGpsAndStart()                  // transect: GPS necesar pentru traseu
     }
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<String>, results: IntArray) {
         super.onRequestPermissionsResult(code, perms, results)
         if (code == PERMISSIONS_REQUEST) {
-            if (results.all { it == PackageManager.PERMISSION_GRANTED }) checkGpsAndStart()
+            if (results.all { it == PackageManager.PERMISSION_GRANTED }) proceedSession()
             else tvStatus.text = "⚠️  Permisiuni refuzate — verifică Setări"
         }
     }
@@ -411,42 +422,136 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showSessionTypeDialog() {
+    // -------------------------------------------------------------------------
+    // SENZOR FIX: locatie -> program nocturn (offline) -> pregatire baterie -> start
+    // -------------------------------------------------------------------------
+
+    private fun prepareFixedSensor() {
+        tvStatus.text = "📍 Obțin locația..."
+        getQuickLocation { loc ->
+            if (loc != null) {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putFloat("fixed_lat", loc.latitude.toFloat())
+                    .putFloat("fixed_lon", loc.longitude.toFloat())
+                    .apply()
+                showFixedSensorPrep(loc.latitude, loc.longitude)
+            } else {
+                AlertDialog.Builder(this)
+                    .setTitle("Fără locație")
+                    .setMessage("Nu am obținut locația GPS. Activează GPS-ul sau introdu coordonate manual.")
+                    .setPositiveButton("Activează GPS") { _, _ ->
+                        startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)); updateUI(false)
+                    }
+                    .setNeutralButton("Coordonate manuale") { _, _ -> showManualFixedLocation() }
+                    .setNegativeButton("Continuă fără") { _, _ -> showFixedSensorPrep(null, null) }
+                    .show()
+            }
+        }
+    }
+
+    private fun showManualFixedLocation() {
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(64, 32, 64, 0) }
+        val etLat = EditText(this).apply { hint = "Latitudine (ex: 45.8312)" }
+        val etLon = EditText(this).apply { hint = "Longitudine (ex: 24.1205)" }
+        layout.addView(etLat); layout.addView(etLon)
         AlertDialog.Builder(this)
-            .setTitle("Tip sesiune")
-            .setMessage(
-                "📍 Senzor fix — GPS oprit după primul fix, baterie maximă\n\n" +
-                "🚶 Transect — GPS activ tot timpul, traseu înregistrat\n\n" +
-                "Alegerea se va memora. Apasă lung pe START pentru a reseta."
-            )
-            .setPositiveButton("📍 Senzor fix") { _, _ ->
-                isFixedPoint = true
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putBoolean(KEY_MODE_SET, true)
-                    .putBoolean(KEY_MODE_FIXED, true)
-                    .apply()
-                updateUI(false)
-                suggestAirplaneMode()
+            .setTitle("Locație senzor")
+            .setView(layout)
+            .setPositiveButton("OK") { _, _ ->
+                showFixedSensorPrep(etLat.text.toString().toDoubleOrNull(), etLon.text.toString().toDoubleOrNull())
             }
-            .setNegativeButton("🚶 Transect") { _, _ ->
-                isFixedPoint = false
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putBoolean(KEY_MODE_SET, true)
-                    .putBoolean(KEY_MODE_FIXED, false)
-                    .apply()
-                updateUI(false)
-                checkPermissionsAndStart()
-            }
+            .setNegativeButton("Anulează") { _, _ -> updateUI(false) }
             .show()
     }
 
-    private fun resetModeChoice() {
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-            .remove(KEY_MODE_SET)
-            .remove(KEY_MODE_FIXED)
-            .apply()
-        Toast.makeText(this, "Modul a fost resetat. La START vei alege din nou.", Toast.LENGTH_SHORT).show()
-        updateUI(RecordingService.isRunning)
+    /** Locatie rapida: last-known (instant, offline) apoi un singur fix GPS cu timeout 15s. */
+    @Suppress("MissingPermission")
+    private fun getQuickLocation(cb: (Location?) -> Unit) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) { cb(null); return }
+        val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        var best: Location? = null
+        for (p in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)) {
+            try {
+                val l = lm.getLastKnownLocation(p) ?: continue
+                if (best == null || l.time > best!!.time) best = l
+            } catch (_: Exception) {}
+        }
+        if (best != null && System.currentTimeMillis() - best!!.time < 5 * 60 * 1000) { cb(best); return }
+        if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) { cb(best); return }
+        var done = false
+        val listener = object : android.location.LocationListener {
+            override fun onLocationChanged(location: Location) {
+                if (done) return; done = true; lm.removeUpdates(this); cb(location)
+            }
+            override fun onProviderDisabled(provider: String) {}
+            override fun onProviderEnabled(provider: String) {}
+            @Deprecated("deprecated") override fun onStatusChanged(p: String?, s: Int, e: Bundle?) {}
+        }
+        try {
+            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, listener, Looper.getMainLooper())
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (!done) { done = true; lm.removeUpdates(listener); cb(best) }
+            }, 15000)
+        } catch (e: Exception) { cb(best) }
+    }
+
+    private fun showFixedSensorPrep(lat: Double?, lon: Double?) {
+        val locTxt = if (lat != null && lon != null) "📍 Locație: %.5f, %.5f".format(lat, lon)
+                     else "📍 Locație: necunoscută"
+        val msg = buildString {
+            append(locTxt).append("\n\n")
+            append("🌙 Program propus (offline, după soare):\n").append(scheduleSuggestion(lat, lon)).append("\n\n")
+            append("🔋 Baterie acum:\n").append(batteryReport()).append("\n\n")
+            append("✅ Pentru autonomie maximă în pădure:\n")
+            append("• Activează Mod avion (dacă nu e semnal) — economie majoră\n")
+            append("• Închide aplicațiile din fundal (Setări → Aplicații)\n")
+            append("• Luminozitate la minim, lasă ecranul să se stingă\n")
+            append("• Dezactivează Bluetooth/WiFi dacă nu le folosești aici\n")
+            append("• Pleacă cu bateria încărcată / powerbank dacă stă mult\n\n")
+            append("Înregistrează doar în fereastra nocturnă (restul timpului doarme → economie).")
+        }
+        AlertDialog.Builder(this)
+            .setTitle("📍 Pregătire senzor fix")
+            .setMessage(msg)
+            .setPositiveButton("▶ Pornește") { _, _ -> startRecording(lat, lon) }
+            .setNeutralButton("✈ Mod avion") { _, _ ->
+                startActivity(Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)); updateUI(false)
+            }
+            .setNegativeButton("Anulează") { _, _ -> updateUI(false) }
+            .setCancelable(false)
+            .show()
+    }
+
+    /** Program nocturn din rasarit/apus — calcul LOCAL (RecordWindow), merge FARA internet. */
+    private fun scheduleSuggestion(lat: Double?, lon: Double?): String {
+        if (lat == null || lon == null) return "Fără locație → fereastră fixă 19:00 → 07:00."
+        val ss = RecordWindow.sunriseSunsetLocalMin(Calendar.getInstance(), lat, lon)
+            ?: return "Calcul indisponibil → fereastră fixă 19:00 → 07:00."
+        val (sunrise, sunset) = ss
+        val start = (sunset - 30 + 1440) % 1440
+        val end = (sunrise + 30) % 1440
+        return "Apus ~${fmtMin(sunset)}, răsărit ~${fmtMin(sunrise)}\n" +
+               "→ înregistrează ${fmtMin(start)} → ${fmtMin(end)} (toată noaptea)"
+    }
+
+    private fun fmtMin(min: Int): String = "%02d:%02d".format(min / 60, min % 60)
+
+    private fun batteryReport(): String {
+        val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val intent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                       status == BatteryManager.BATTERY_STATUS_FULL
+        val tempC = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)
+            ?.let { if (it > 0) it / 10.0 else null }
+        val sb = StringBuilder()
+        sb.append("• Nivel: ").append(if (level >= 0) "$level%" else "?")
+        if (charging) sb.append(" (se încarcă)")
+        if (tempC != null) sb.append("\n• Temperatură: %.0f°C".format(tempC))
+        if (level in 0..49 && !charging) sb.append("\n⚠ Sub 50% — încarcă înainte de a lăsa în teren")
+        return sb.toString()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -497,23 +602,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton("Anulează", null)
-            .show()
-    }
-
-    private fun suggestAirplaneMode() {
-        AlertDialog.Builder(this)
-            .setTitle("✈ Economisire baterie")
-            .setMessage(
-                "Dacă nu există semnal mobil în zonă, rețeaua consumă baterie inutil.\n\n" +
-                "Recomandare: activează Mod avion înainte de a lăsa telefonul în teren. " +
-                "Upload-ul se va face manual când recuperezi telefonul pe WiFi."
-            )
-            .setPositiveButton("Activează Mod avion") { _, _ ->
-                startActivity(Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS))
-            }
-            .setNegativeButton("Continuă fără") { _, _ ->
-                checkPermissionsAndStart()
-            }
             .show()
     }
 
