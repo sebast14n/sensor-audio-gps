@@ -104,7 +104,7 @@ class RecordingService : Service() {
 
     private fun startSession() {
         val ts = sdf.format(Date())
-        val base = getExternalFilesDir(null) ?: filesDir
+        val base = Storage.baseDir(this)
         sessionDir = File(base, "session_$ts").also { it.mkdirs() }
 
         gpxFile = File(sessionDir, "track_$ts.gpx")

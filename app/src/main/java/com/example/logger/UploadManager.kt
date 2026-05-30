@@ -31,12 +31,7 @@ class UploadManager(private val context: Context) {
         fun onError(message: String)
     }
 
-    fun getLocalSessions(): List<File> {
-        val base = context.getExternalFilesDir(null) ?: context.filesDir
-        return (base.listFiles() ?: emptyArray())
-            .filter { it.isDirectory && it.name.startsWith("session_") }
-            .sortedByDescending { it.name }
-    }
+    fun getLocalSessions(): List<File> = Storage.sessions(context)
 
     fun uploadSessionAsync(sessionDir: File, callback: ProgressCallback) {
         Thread {

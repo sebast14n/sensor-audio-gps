@@ -37,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnQrAuth: Button
     private lateinit var btnGoogleLogin: Button
     private lateinit var btnCompass: Button
+    private lateinit var btnRecordings: Button
     private lateinit var tvStatus: TextView
     private lateinit var tvUploadStatus: TextView
     private lateinit var tvPath: TextView
@@ -63,14 +64,16 @@ class MainActivity : AppCompatActivity() {
         btnQrAuth        = findViewById(R.id.btnQrAuth)
         btnGoogleLogin   = findViewById(R.id.btnGoogleLogin)
         btnCompass       = findViewById(R.id.btnCompass)
+        btnRecordings    = findViewById(R.id.btnRecordings)
         tvStatus      = findViewById(R.id.tvStatus)
         tvUploadStatus = findViewById(R.id.tvUploadStatus)
         tvPath        = findViewById(R.id.tvPath)
 
         uploadManager = UploadManager(this)
 
-        val saveDir = getExternalFilesDir(null)?.absolutePath ?: filesDir.absolutePath
-        tvPath.text = "Fișierele se salvează în:\n$saveDir"
+        val saveDir = Storage.baseDir(this).absolutePath
+        tvPath.text = "Fișierele se salvează în:\n$saveDir" +
+            (if (Storage.canUsePublic()) "\n✓ păstrate și după dezinstalare" else "\n⚠ doar privat (acordă „Access all files”)")
 
         // Load saved mode preference
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
@@ -109,9 +112,12 @@ class MainActivity : AppCompatActivity() {
             // Permite si destinatie manuala ad-hoc din lista.
             startActivity(Intent(this, PoisListActivity::class.java))
         }
+        btnRecordings.setOnClickListener { showRecordingsManager() }
 
         // Solicita exceptare de la battery optimization la prima rulare
         requestBatteryOptimizationExemption()
+        // Solicita "All files access" o singura data (inregistrari in folder public)
+        requestStorageOnce()
 
         // Verifica daca exista o versiune mai noua (silentios la esec)
         UpdateChecker.checkAsync(this)
@@ -219,6 +225,64 @@ class MainActivity : AppCompatActivity() {
                 "$date  $time"
             } else ts
         } catch (e: Exception) { ts }
+    }
+
+    // -------------------------------------------------------------------------
+    // Storage public + management inregistrari
+    // -------------------------------------------------------------------------
+
+    private fun requestStorageOnce() {
+        if (Storage.canUsePublic()) return
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        if (prefs.getBoolean("asked_all_files", false)) return
+        prefs.edit().putBoolean("asked_all_files", true).apply()
+        AlertDialog.Builder(this)
+            .setTitle("Păstrarea înregistrărilor")
+            .setMessage("Ca înregistrările să rămână pe telefon și după dezinstalarea aplicației, " +
+                "se salvează în folderul public BioEcho.\n\n" +
+                "Acordă permisiunea „Access all files” pe ecranul următor (o singură dată).")
+            .setPositiveButton("Acordă") { _, _ -> Storage.requestAllFilesAccess(this) }
+            .setNegativeButton("Mai târziu", null)
+            .show()
+    }
+
+    private fun showRecordingsManager() {
+        val sessions = Storage.sessions(this)
+        if (sessions.isEmpty()) {
+            val b = AlertDialog.Builder(this)
+                .setTitle("🗂 Înregistrări")
+                .setMessage("Nicio sesiune salvată încă." +
+                    (if (!Storage.canUsePublic()) "\n\n⚠ Pentru păstrare după dezinstalare, acordă „Access all files”." else ""))
+                .setPositiveButton("OK", null)
+            if (!Storage.canUsePublic())
+                b.setNeutralButton("Acordă acces") { _, _ -> Storage.requestAllFilesAccess(this) }
+            b.show()
+            return
+        }
+        val total = sessions.sumOf { Storage.dirSize(it) }
+        val labels = sessions.map { dir ->
+            val n = dir.listFiles()?.count { it.name.endsWith(".m4a") || it.name.endsWith(".wav") } ?: 0
+            "${formatTimestamp(dir.name.removePrefix("session_"))}\n$n fișiere · ${Storage.humanSize(Storage.dirSize(dir))}"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("🗂 Înregistrări (${sessions.size}) — total ${Storage.humanSize(total)}")
+            .setItems(labels) { _, idx -> confirmDeleteSession(sessions[idx]) }
+            .setNegativeButton("Închide", null)
+            .show()
+    }
+
+    private fun confirmDeleteSession(dir: File) {
+        AlertDialog.Builder(this)
+            .setTitle("Șterge sesiunea?")
+            .setMessage("${formatTimestamp(dir.name.removePrefix("session_"))}\n" +
+                "${Storage.humanSize(Storage.dirSize(dir))}\n\nSe șterge definitiv de pe telefon.")
+            .setPositiveButton("🗑 Șterge") { _, _ ->
+                val ok = dir.deleteRecursively()
+                Toast.makeText(this, if (ok) "Sesiune ștearsă." else "Nu am putut șterge.", Toast.LENGTH_SHORT).show()
+                showRecordingsManager()
+            }
+            .setNegativeButton("Anulează", null)
+            .show()
     }
 
     private fun doUpload(sessionDir: File) {

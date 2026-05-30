@@ -94,6 +94,25 @@
         android:layout_marginBottom="8dp">
 
         <Button
+            android:id="@+id/btnRecordings"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:text="🗂 ÎNREGISTRĂRI (spațiu · șterge)"
+            android:textSize="12sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#37474F"/>
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginBottom="8dp">
+
+        <Button
             android:id="@+id/btnQrAuth"
             android:layout_width="0dp"
             android:layout_height="40dp"
