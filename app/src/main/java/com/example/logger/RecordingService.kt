@@ -120,11 +120,14 @@ class RecordingService : Service() {
             startGps()
         }
 
-        // Anti-furt: monitor miscare + baterie (non-fatal daca esueaza)
-        try {
-            antiTheft = AntiTheftMonitor(this) { lastLat ?: staticLat }
-                .also { it.locationLon = { lastLon ?: staticLon }; it.start() }
-        } catch (_: Exception) {}
+        // Anti-furt: DOAR in mod senzor nesupravegheat (scheduled) — altfel, in transect,
+        // miscarea operatorului ar genera alarme false. Non-fatal daca esueaza.
+        if (scheduled) {
+            try {
+                antiTheft = AntiTheftMonitor(this) { lastLat ?: staticLat }
+                    .also { it.locationLon = { lastLon ?: staticLon }; it.start() }
+            } catch (_: Exception) {}
+        }
 
         if (scheduled) {
             // evalueaza imediat + verifica periodic fereastra

@@ -10,6 +10,7 @@ import android.hardware.TriggerEvent
 import android.hardware.TriggerEventListener
 import android.os.BatteryManager
 import android.telephony.TelephonyManager
+import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -57,7 +58,10 @@ class AntiTheftMonitor(
                 }
             }
         }
-        ctx.registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_LOW))
+        ContextCompat.registerReceiver(
+            ctx, batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_LOW),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     fun stop() {
