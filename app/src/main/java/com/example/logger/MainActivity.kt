@@ -33,9 +33,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnFixedSensor: Button
     private lateinit var startButtonsRow: View
     private lateinit var btnUpload: Button
-    private lateinit var btnSetToken: Button
-    private lateinit var btnQrAuth: Button
-    private lateinit var btnGoogleLogin: Button
+    private lateinit var btnAuth: Button
     private lateinit var btnCompass: Button
     private lateinit var btnRecordings: Button
     private lateinit var tvStatus: TextView
@@ -60,9 +58,7 @@ class MainActivity : AppCompatActivity() {
         btnFixedSensor   = findViewById(R.id.btnFixedSensor)
         startButtonsRow  = findViewById(R.id.startButtonsRow)
         btnUpload        = findViewById(R.id.btnUpload)
-        btnSetToken      = findViewById(R.id.btnSetToken)
-        btnQrAuth        = findViewById(R.id.btnQrAuth)
-        btnGoogleLogin   = findViewById(R.id.btnGoogleLogin)
+        btnAuth          = findViewById(R.id.btnAuth)
         btnCompass       = findViewById(R.id.btnCompass)
         btnRecordings    = findViewById(R.id.btnRecordings)
         tvStatus      = findViewById(R.id.tvStatus)
@@ -92,21 +88,7 @@ class MainActivity : AppCompatActivity() {
         btnFixedSensor.setOnClickListener { beginSession(fixed = true) }
 
         btnUpload.setOnClickListener { showSessionPicker() }
-        btnSetToken.setOnClickListener { showTokenDialog() }
-        btnQrAuth.setOnClickListener { startActivityForResult(Intent(this, QrScanActivity::class.java), 300) }
-        btnGoogleLogin.setOnClickListener {
-            tvUploadStatus.text = "Se conectează la Google..."
-            GoogleLogin.signIn(this,
-                onSuccess = { email, name ->
-                    tvUploadStatus.text = "✓ Logat ca $email" + (if (name.isNotBlank()) " ($name)" else "")
-                    Toast.makeText(this, "Bine ai venit, ${name.ifBlank { email }}!", Toast.LENGTH_LONG).show()
-                },
-                onError = { msg ->
-                    tvUploadStatus.text = "⚠ Login Google eșuat: $msg"
-                    Toast.makeText(this, "Login Google: $msg", Toast.LENGTH_LONG).show()
-                }
-            )
-        }
+        btnAuth.setOnClickListener { showAuthMenu() }
         btnCompass.setOnClickListener {
             // Deschide lista de POI-uri (sincronizate de pe BioEcho web).
             // Permite si destinatie manuala ad-hoc din lista.
@@ -127,6 +109,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         updateUI(RecordingService.isRunning)
         verifyMobileAuth()
+        updateAuthButton()
     }
 
     /**
@@ -168,6 +151,61 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { tvUploadStatus.text = "⚠ Offline (auth necheck): ${e.message}" }
             }
         }.start()
+    }
+
+    // -------------------------------------------------------------------------
+    // Autentificare consolidata (un singur buton -> meniu cu cele 3 variante)
+    // -------------------------------------------------------------------------
+
+    private fun isLoggedIn(): Boolean =
+        !getSharedPreferences("bioecho_prefs", MODE_PRIVATE).getString("jwt_token", null).isNullOrBlank()
+
+    private fun updateAuthButton() {
+        btnAuth.text = if (isLoggedIn()) "👤 CONT" else "🔑 AUTENTIFICARE"
+    }
+
+    private fun showAuthMenu() {
+        val prefs = getSharedPreferences("bioecho_prefs", MODE_PRIVATE)
+        if (isLoggedIn()) {
+            val email = prefs.getString("user_email", "") ?: ""
+            AlertDialog.Builder(this)
+                .setTitle("Cont")
+                .setMessage(if (email.isNotBlank()) "Autentificat ca:\n$email" else "Ești autentificat.")
+                .setPositiveButton("🚪 Deconectare") { _, _ ->
+                    prefs.edit().remove("jwt_token").remove("user_email").apply()
+                    Toast.makeText(this, "Deconectat.", Toast.LENGTH_SHORT).show()
+                    updateAuthButton(); verifyMobileAuth()
+                }
+                .setNegativeButton("Închide", null)
+                .show()
+        } else {
+            AlertDialog.Builder(this)
+                .setTitle("Autentificare")
+                .setItems(arrayOf("🅖  Cu Google", "📷  Cu cod QR", "🔑  Cu token (avansat)")) { _, which ->
+                    when (which) {
+                        0 -> doGoogleLogin()
+                        1 -> startActivityForResult(Intent(this, QrScanActivity::class.java), 300)
+                        2 -> showTokenDialog()
+                    }
+                }
+                .setNegativeButton("Anulează", null)
+                .show()
+        }
+    }
+
+    private fun doGoogleLogin() {
+        tvUploadStatus.text = "Se conectează la Google..."
+        GoogleLogin.signIn(this,
+            onSuccess = { email, name ->
+                tvUploadStatus.text = "✓ Logat ca $email" + (if (name.isNotBlank()) " ($name)" else "")
+                Toast.makeText(this, "Bine ai venit, ${name.ifBlank { email }}!", Toast.LENGTH_LONG).show()
+                updateAuthButton()
+            },
+            onError = { msg ->
+                tvUploadStatus.text = "⚠ Login Google eșuat: $msg"
+                Toast.makeText(this, "Login Google: $msg", Toast.LENGTH_LONG).show()
+            }
+        )
     }
 
     private fun updateUI(recording: Boolean) {

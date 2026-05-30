@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.Looper
 import android.text.InputType
@@ -19,6 +21,10 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.cachemanager.CacheManager
+import org.osmdroid.tileprovider.modules.SqlTileWriter
+import org.osmdroid.util.BoundingBox
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.math.roundToInt
@@ -143,6 +149,7 @@ class PoisListActivity : AppCompatActivity() {
                         pois = list
                         tvStatus.text = "${list.size} puncte sincronizate"
                         renderList()
+                        precacheSatellite(list)   // pre-incarca harta satelit offline (auto, pe WiFi)
                     }
                 } else {
                     runOnUiThread {
@@ -154,6 +161,51 @@ class PoisListActivity : AppCompatActivity() {
                 runOnUiThread { tvStatus.text = "⚠ Eroare rețea: ${e.message}" }
             }
         }.start()
+    }
+
+    /** Pre-incarca tiles satelit (Esri) in jurul POI-urilor ca harta sa mearga OFFLINE in teren.
+     *  Automat, DOAR pe WiFi (sa nu consume date mobile fara stire). Cache comun cu MapActivity. */
+    private fun precacheSatellite(list: List<JSONObject>) {
+        if (list.isEmpty() || !isWifi()) return
+        Configuration.getInstance().load(this, getSharedPreferences("osmdroid", MODE_PRIVATE))
+        var minLat = 90.0; var maxLat = -90.0; var minLon = 180.0; var maxLon = -180.0
+        var any = false
+        for (p in list) {
+            val lat = p.optDouble("lat", Double.NaN); val lon = p.optDouble("lon", Double.NaN)
+            if (lat.isNaN() || lon.isNaN()) continue
+            any = true
+            minLat = minOf(minLat, lat); maxLat = maxOf(maxLat, lat)
+            minLon = minOf(minLon, lon); maxLon = maxOf(maxLon, lon)
+        }
+        if (!any) return
+        val buf = 0.012   // ~1.3 km tampon in jurul POI-urilor
+        val box = BoundingBox(maxLat + buf, maxLon + buf, minLat - buf, minLon - buf)
+        val cm = CacheManager(SatelliteTiles.esri(), SqlTileWriter(), 13, 16)
+        val total = try { cm.possibleTilesInArea(box, 13, 16) } catch (e: Exception) { 0 }
+        if (total <= 0) return
+        if (total > 4000) {
+            Toast.makeText(this, "Zona POI prea mare pt cache satelit ($total tiles) — sărit", Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(this, "Pre-încarc harta satelit offline ($total tiles)...", Toast.LENGTH_SHORT).show()
+        cm.downloadAreaAsync(this, box, 13, 16, object : CacheManager.CacheManagerCallback {
+            override fun onTaskComplete() {
+                runOnUiThread { Toast.makeText(this@PoisListActivity, "✓ Hartă satelit salvată offline", Toast.LENGTH_SHORT).show() }
+            }
+            override fun updateProgress(progress: Int, currentZoomLevel: Int, zoomMin: Int, zoomMax: Int) {}
+            override fun downloadStarted() {}
+            override fun setPossibleTilesInArea(t: Int) {}
+            override fun onTaskFailed(errors: Int) {
+                runOnUiThread { Toast.makeText(this@PoisListActivity, "⚠ $errors erori la cache satelit", Toast.LENGTH_SHORT).show() }
+            }
+        })
+    }
+
+    private fun isWifi(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val net = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(net) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
     private fun renderList() {
