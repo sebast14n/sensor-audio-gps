@@ -58,6 +58,7 @@ class MapActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Configuration.getInstance().load(this, getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
+        Configuration.getInstance().userAgentValue = packageName   // osmdroid cere user-agent
         setContentView(R.layout.activity_map)
 
         destLat = intent.getDoubleExtra("lat", 0.0)
@@ -96,7 +97,6 @@ class MapActivity : AppCompatActivity() {
             btnPrecache.setOnClickListener { precache5km() }
             drawTrack()
             trackHandler.postDelayed(trackRefresh, 4000)
-            mapView.postDelayed({ precache5km() }, 2500)   // cache 5x5km auto la deschidere (de obicei e net)
         } else {
             addDestinationMarker()
             btnCompassFromMap.setOnClickListener {
@@ -110,6 +110,7 @@ class MapActivity : AppCompatActivity() {
 
     /** Citeste GPX-ul sesiunii curente si deseneaza traseul (linie). Reapelat la refresh. */
     private fun drawTrack() {
+      try {
         val path = RecordingService.currentGpxPath ?: run {
             tvDistance.text = "🚶 Traseu — fara sesiune activa"; return
         }
@@ -134,6 +135,7 @@ class MapActivity : AppCompatActivity() {
             tvDistance.text = "🚶 Traseu: $lenStr · ${pts.size} pct"
         }
         mapView.invalidate()
+      } catch (e: Exception) { /* nu lasa harta sa crape din desenarea traseului */ }
     }
 
     private fun parseGpx(path: String): List<GeoPoint> {
@@ -152,6 +154,7 @@ class MapActivity : AppCompatActivity() {
 
     @Suppress("DEPRECATION")
     private fun precache5km() {
+      try {
         val loc = myLocationOverlay.myLocation
             ?: lastLocation?.let { GeoPoint(it.latitude, it.longitude) }
         if (loc == null) { Toast.makeText(this, "Aștept locația GPS...", Toast.LENGTH_SHORT).show(); return }
@@ -172,6 +175,9 @@ class MapActivity : AppCompatActivity() {
                 runOnUiThread { Toast.makeText(this@MapActivity, "⚠ $errors erori cache", Toast.LENGTH_SHORT).show() }
             }
         })
+      } catch (e: Exception) {
+        Toast.makeText(this, "Cache satelit indisponibil acum", Toast.LENGTH_SHORT).show()
+      }
     }
 
     /** Mod pick: confirma centrul hartii (crucea) ca punct ales. */

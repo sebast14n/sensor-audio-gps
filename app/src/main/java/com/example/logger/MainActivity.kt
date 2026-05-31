@@ -52,6 +52,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        installCrashLogger()
         setContentView(R.layout.activity_main)
 
         btnStartStop     = findViewById(R.id.btnStartStop)
@@ -167,6 +168,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateAuthButton() {
         btnAuth.text = if (isLoggedIn()) "👤 CONT" else "🔑 AUTENTIFICARE"
+    }
+
+    /** Scrie orice crash necontrolat intr-un fisier in /BioEcho/crash_log.txt (depanare pe teren). */
+    private fun installCrashLogger() {
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try {
+                val sw = java.io.StringWriter()
+                e.printStackTrace(java.io.PrintWriter(sw))
+                File(Storage.baseDir(this), "crash_log.txt")
+                    .appendText("\n\n=== ${java.util.Date()} thread=${t.name} ===\n$sw")
+            } catch (_: Exception) {}
+            prev?.uncaughtException(t, e)
+        }
     }
 
     private fun showAuthMenu() {
