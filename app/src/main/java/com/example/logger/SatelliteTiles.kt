@@ -14,8 +14,8 @@ object SatelliteTiles {
         "EsriWorldImagery", 0, 19, 256, ".jpg",
         arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"),
         "Esri World Imagery",
-        TileSourcePolicy(2, TileSourcePolicy.FLAG_NO_BULK
-                or TileSourcePolicy.FLAG_NO_PREVENTIVE
+        // NU FLAG_NO_BULK — altfel CacheManager arunca TileSourcePolicyException la pre-cache
+        TileSourcePolicy(2, TileSourcePolicy.FLAG_NO_PREVENTIVE
                 or TileSourcePolicy.FLAG_USER_AGENT_NORMALIZED
                 or TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL)
     ) {

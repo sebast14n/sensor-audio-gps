@@ -203,7 +203,7 @@ class MapActivity : AppCompatActivity() {
             "EsriWorldImagery", 0, 19, 256, ".jpg",
             arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"),
             "Esri World Imagery",
-            TileSourcePolicy(2, TileSourcePolicy.FLAG_NO_BULK or TileSourcePolicy.FLAG_NO_PREVENTIVE or TileSourcePolicy.FLAG_USER_AGENT_NORMALIZED or TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL)
+            TileSourcePolicy(2, TileSourcePolicy.FLAG_NO_PREVENTIVE or TileSourcePolicy.FLAG_USER_AGENT_NORMALIZED or TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL)
         ) {
             override fun getTileURLString(pMapTileIndex: Long): String {
                 val z = MapTileIndex.getZoom(pMapTileIndex)
