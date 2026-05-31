@@ -275,7 +275,16 @@ class PoisListActivity : AppCompatActivity() {
             .setTitle("Punct selectat pe hartă")
             .setMessage("📍 %.5f, %.5f".format(lat, lon))
             .setView(layout)
-            .setPositiveButton("Navighează") { _, _ ->
+            // Principal: salveaza in zona privata (sync cu harta web) + navigheaza
+            .setPositiveButton("Salvează + navighează") { _, _ ->
+                val name = etName.text.toString().ifBlank { "Punct" }
+                savePoi(name, lat, lon)
+                startActivity(Intent(this, CompassActivity::class.java).apply {
+                    putExtra("lat", lat); putExtra("lon", lon); putExtra("name", name)
+                })
+            }
+            // Doar pentru navigare ad-hoc, fara a salva
+            .setNeutralButton("Doar navighează") { _, _ ->
                 startActivity(Intent(this, CompassActivity::class.java).apply {
                     putExtra("lat", lat); putExtra("lon", lon)
                     putExtra("name", etName.text.toString().ifBlank { "Destinație" })
@@ -283,6 +292,45 @@ class PoisListActivity : AppCompatActivity() {
             }
             .setNegativeButton("Anulează", null)
             .show()
+    }
+
+    /** Salveaza POI in zona privata a userului: POST /api/pois -> apare pe harta web,
+     *  se poate sterge de acolo. Esecul de retea e non-fatal (doar toast). */
+    private fun savePoi(name: String, lat: Double, lon: Double) {
+        val prefs = getSharedPreferences("bioecho_prefs", MODE_PRIVATE)
+        val jwt = prefs.getString("jwt_token", null)
+        if (jwt.isNullOrBlank()) {
+            Toast.makeText(this, "⚠ Neautentificat — punctul nu a fost salvat", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Thread {
+            try {
+                val body = JSONObject().apply {
+                    put("name", name); put("lat", lat); put("lon", lon)
+                }
+                val conn = (URL("https://echo.noze.ro/api/pois").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 10000; readTimeout = 15000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("Authorization", "Bearer $jwt")
+                }
+                conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                val ok = conn.responseCode in 200..299
+                try { conn.inputStream.use { it.readBytes() } } catch (_: Exception) {}
+                conn.disconnect()
+                runOnUiThread {
+                    if (ok) {
+                        Toast.makeText(this, "✓ Punct salvat: $name", Toast.LENGTH_SHORT).show()
+                        loadPois()  // re-sync lista (va include noul punct)
+                    } else {
+                        Toast.makeText(this, "⚠ Server: HTTP ${conn.responseCode} — nesalvat", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, "⚠ Rețea: ${e.message} — nesalvat", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
     }
 
     private fun showManualDialog() {

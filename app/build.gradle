@@ -11,8 +11,8 @@ android {
         applicationId "com.example.logger"
         minSdk 26
         targetSdk 35
-        versionCode 18
-        versionName "1.6.0"
+        versionCode 19
+        versionName "1.6.1"
 
         // Web Client ID din Google Cloud Console (acelasi cu echo.noze.ro)
         // Folosit de Credential Manager pentru Sign in with Google
