@@ -76,23 +76,12 @@
         android:layout_marginBottom="8dp">
 
         <Button
-            android:id="@+id/btnUpload"
-            android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:layout_weight="1"
-            android:text="⬆ UPLOAD"
-            android:textSize="14sp"
-            android:textColor="#FFFFFF"
-            android:backgroundTint="#1565C0"
-            android:layout_marginEnd="8dp"/>
-
-        <Button
             android:id="@+id/btnAuth"
             android:layout_width="0dp"
             android:layout_height="48dp"
             android:layout_weight="1"
             android:text="🔑 AUTENTIFICARE"
-            android:textSize="13sp"
+            android:textSize="14sp"
             android:textColor="#FFFFFF"
             android:backgroundTint="#4285F4"/>
 

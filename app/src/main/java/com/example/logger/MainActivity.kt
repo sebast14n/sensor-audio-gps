@@ -33,7 +33,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnTransect: Button
     private lateinit var btnFixedSensor: Button
     private lateinit var startButtonsRow: View
-    private lateinit var btnUpload: Button
     private lateinit var btnAuth: Button
     private lateinit var btnCompass: Button
     private lateinit var btnRecordings: Button
@@ -45,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     private val PERMISSIONS_REQUEST = 100
     private var isFixedPoint = true  // default: senzor fix (GPS oprit dupa primul fix)
     private var pendingFixed = true  // ce mod a initiat cererea de permisiuni
+    private var mediaPlayer: android.media.MediaPlayer? = null
 
     private val PREFS = "bioecho_prefs"
     private val KEY_MODE_SET = "session_mode_set"
@@ -60,7 +60,6 @@ class MainActivity : AppCompatActivity() {
         btnTransect      = findViewById(R.id.btnTransect)
         btnFixedSensor   = findViewById(R.id.btnFixedSensor)
         startButtonsRow  = findViewById(R.id.startButtonsRow)
-        btnUpload        = findViewById(R.id.btnUpload)
         btnAuth          = findViewById(R.id.btnAuth)
         btnCompass       = findViewById(R.id.btnCompass)
         btnRecordings    = findViewById(R.id.btnRecordings)
@@ -93,7 +92,6 @@ class MainActivity : AppCompatActivity() {
         btnTransect.setOnClickListener { beginSession(fixed = false) }
         btnFixedSensor.setOnClickListener { beginSession(fixed = true) }
 
-        btnUpload.setOnClickListener { showSessionPicker() }
         btnAuth.setOnClickListener { showAuthMenu() }
         btnCompass.setOnClickListener {
             // Deschide lista de POI-uri (sincronizate de pe BioEcho web).
@@ -108,7 +106,13 @@ class MainActivity : AppCompatActivity() {
         requestStorageOnce()
 
         // Verifica daca exista o versiune mai noua (silentios la esec)
-        UpdateChecker.checkAsync(this)
+        // Verificare versiune DOAR o data per instalare (silentios) — nu la fiecare pornire.
+        // (push real -> in viitor prin C&C-ul de control la distanta, v2.0)
+        val pfUpd = getSharedPreferences(PREFS, MODE_PRIVATE)
+        if (pfUpd.getInt("update_checked_vc", -1) != BuildConfig.VERSION_CODE) {
+            pfUpd.edit().putInt("update_checked_vc", BuildConfig.VERSION_CODE).apply()
+            UpdateChecker.checkAsync(this, verbose = false)
+        }
     }
 
     override fun onResume() {
@@ -116,6 +120,12 @@ class MainActivity : AppCompatActivity() {
         updateUI(RecordingService.isRunning)
         verifyMobileAuth()
         updateAuthButton()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        mediaPlayer?.release()   // opreste redarea cand pleci din ecran
+        mediaPlayer = null
     }
 
     /**
@@ -234,14 +244,12 @@ class MainActivity : AppCompatActivity() {
             btnStartStop.setBackgroundColor(0xFFE53935.toInt())
             startButtonsRow.visibility = View.GONE
             tvStatus.text = if (isFixedPoint) "🔴  Senzor fix — activ" else "🔴  Transect — activ"
-            btnUpload.isEnabled = false
             btnCompass.visibility = if (isFixedPoint) View.GONE else View.VISIBLE
             btnTrackMap.visibility = if (!isFixedPoint) View.VISIBLE else View.GONE  // doar la transect
         } else {
             btnStartStop.visibility = View.GONE
             startButtonsRow.visibility = View.VISIBLE
             tvStatus.text = "⚪  Alege modul de operare"
-            btnUpload.isEnabled = true
             btnCompass.visibility = View.VISIBLE
             btnTrackMap.visibility = View.GONE
         }
@@ -326,9 +334,43 @@ class MainActivity : AppCompatActivity() {
         }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle("🗂 Înregistrări (${sessions.size}) — total ${Storage.humanSize(total)}")
-            .setItems(labels) { _, idx -> confirmDeleteSession(sessions[idx]) }
+            .setItems(labels) { _, idx -> showSessionActions(sessions[idx]) }
             .setNegativeButton("Închide", null)
             .show()
+    }
+
+    /** Actiuni per inregistrare: Asculta / Upload / Sterge. */
+    private fun showSessionActions(dir: File) {
+        AlertDialog.Builder(this)
+            .setTitle(formatTimestamp(dir.name.removePrefix("session_")))
+            .setItems(arrayOf("▶  Ascultă", "⬆  Upload", "🗑  Șterge")) { _, which ->
+                when (which) {
+                    0 -> playSession(dir)
+                    1 -> doUpload(dir)
+                    2 -> confirmDeleteSession(dir)
+                }
+            }
+            .setNegativeButton("Înapoi") { _, _ -> showRecordingsManager() }
+            .show()
+    }
+
+    /** Reda primul fisier audio din sesiune (verificare rapida ca s-a captat). */
+    private fun playSession(dir: File) {
+        val audio = dir.listFiles()
+            ?.filter { it.name.endsWith(".m4a") || it.name.endsWith(".wav") }
+            ?.sortedBy { it.name }?.firstOrNull()
+        if (audio == null) { Toast.makeText(this, "Nicio înregistrare audio în sesiune", Toast.LENGTH_SHORT).show(); return }
+        try {
+            mediaPlayer?.release()
+            mediaPlayer = android.media.MediaPlayer().apply {
+                setDataSource(audio.absolutePath)
+                setOnCompletionListener { it.release(); if (mediaPlayer === it) mediaPlayer = null }
+                prepare(); start()
+            }
+            Toast.makeText(this, "▶ Redau ${audio.name}", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Nu pot reda: ${e.message?.take(60)}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun confirmDeleteSession(dir: File) {
@@ -365,7 +407,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        btnUpload.isEnabled = false
         tvUploadStatus.text = "Se pregătește upload-ul..."
 
         uploadManager.uploadSessionAsync(sessionDir, object : UploadManager.ProgressCallback {
@@ -377,7 +418,6 @@ class MainActivity : AppCompatActivity() {
 
             override fun onDone(result: UploadManager.UploadResult) {
                 runOnUiThread {
-                    btnUpload.isEnabled = !RecordingService.isRunning
                     val msg = buildString {
                         append("✓ ${result.success} încărcate")
                         if (result.skipped > 0) append(", ${result.skipped} deja existente")
@@ -392,7 +432,6 @@ class MainActivity : AppCompatActivity() {
 
             override fun onError(message: String) {
                 runOnUiThread {
-                    btnUpload.isEnabled = !RecordingService.isRunning
                     tvUploadStatus.text = "⚠ $message"
                 }
             }
