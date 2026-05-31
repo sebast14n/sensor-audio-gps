@@ -511,6 +511,9 @@ class MainActivity : AppCompatActivity() {
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             needed.add(Manifest.permission.POST_NOTIFICATIONS)
+        // Senzor fix -> anti-intruziune cu scanare BLE (Android 12+ cere BLUETOOTH_SCAN la runtime)
+        if (fixed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            needed.add(Manifest.permission.BLUETOOTH_SCAN)
         val missing = needed.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
@@ -526,7 +529,13 @@ class MainActivity : AppCompatActivity() {
     override fun onRequestPermissionsResult(code: Int, perms: Array<String>, results: IntArray) {
         super.onRequestPermissionsResult(code, perms, results)
         if (code == PERMISSIONS_REQUEST) {
-            if (results.all { it == PackageManager.PERMISSION_GRANTED }) proceedSession()
+            // Esentiale: audio + locatie. BLUETOOTH_SCAN / notificari sunt optionale
+            // (anti-intruziunea BLE merge fara, doar nu scaneaza) -> nu blocam sesiunea.
+            val essential = setOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION)
+            val essentialOk = perms.indices.none { i ->
+                perms[i] in essential && results[i] != PackageManager.PERMISSION_GRANTED
+            }
+            if (essentialOk) proceedSession()
             else tvStatus.text = "⚠️  Permisiuni refuzate — verifică Setări"
         }
     }

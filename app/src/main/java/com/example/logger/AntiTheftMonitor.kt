@@ -1,14 +1,23 @@
 package com.example.logger
 
+import android.bluetooth.BluetoothManager
+import android.bluetooth.le.BluetoothLeScanner
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.hardware.TriggerEvent
 import android.hardware.TriggerEventListener
 import android.os.BatteryManager
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
@@ -41,6 +50,36 @@ class AntiTheftMonitor(
     private val prefs = ctx.getSharedPreferences("bioecho_prefs", Context.MODE_PRIVATE)
     private val server = "https://echo.noze.ro"
 
+    // --- anti-intruziune BLE + storage (poll periodic) ---
+    private val handler = Handler(Looper.getMainLooper())
+    private val SCAN_PERIOD_MS = 90_000L   // o data la 90s (low power)
+    private val SCAN_WINDOW_MS = 8_000L    // scaneaza ~8s, apoi opreste
+    private val BT_RSSI_MIN = -85          // ignora semnale foarte slabe (departe)
+    private val STORAGE_MIN_MB = 500L      // alerta cand scade sub 500 MB liberi
+    private var storageAlerted = false
+    private var scanner: BluetoothLeScanner? = null
+    // address -> (rssi cel mai bun, eticheta tip)
+    private val seen = HashMap<String, Pair<Int, String>>()
+
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult?) {
+            result ?: return
+            if (result.rssi < BT_RSSI_MIN) return
+            val addr = try { result.device?.address } catch (_: SecurityException) { null } ?: return
+            val label = classifyBle(result)
+            val prev = seen[addr]
+            if (prev == null || result.rssi > prev.first) seen[addr] = result.rssi to label
+        }
+    }
+
+    private val pollTick = object : Runnable {
+        override fun run() {
+            runBleScan()
+            checkStorage()
+            handler.postDelayed(this, SCAN_PERIOD_MS)
+        }
+    }
+
     private val triggerListener = object : TriggerEventListener() {
         override fun onTrigger(event: TriggerEvent?) {
             sendAlert("moved", mapOf("note" to "telefon mutat din pozitie"))
@@ -62,11 +101,86 @@ class AntiTheftMonitor(
             ctx, batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_LOW),
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
+        // porneste poll-ul periodic BLE + storage (prima rulare dupa o intarziere scurta)
+        handler.postDelayed(pollTick, 15_000L)
     }
 
     fun stop() {
         motion?.let { sm?.cancelTriggerSensor(triggerListener, it) }
         try { batteryReceiver?.let { ctx.unregisterReceiver(it) } } catch (_: Exception) {}
+        handler.removeCallbacks(pollTick)
+        try { scanner?.stopScan(scanCallback) } catch (_: Exception) {}
+    }
+
+    // === Anti-intruziune BLE ===
+    // Scaneaza ~8s dupa dispozitive BLE din apropiere. Orice prezenta noua (telefon, tag,
+    // ceas, casti) = posibil intrus langa senzorul lasat nesupravegheat -> alerta in CCC.
+    private fun runBleScan() {
+        if (!hasBtScanPerm()) return
+        val mgr = ctx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager ?: return
+        val adapter = mgr.adapter ?: return
+        if (!adapter.isEnabled) return
+        scanner = adapter.bluetoothLeScanner ?: return
+        seen.clear()
+        try {
+            val settings = ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
+                .build()
+            scanner?.startScan(null, settings, scanCallback)
+        } catch (_: Exception) { return }
+        handler.postDelayed({
+            try { scanner?.stopScan(scanCallback) } catch (_: Exception) {}
+            evaluateBleScan()
+        }, SCAN_WINDOW_MS)
+    }
+
+    private fun evaluateBleScan() {
+        if (seen.isEmpty()) return
+        val strongest = seen.values.maxByOrNull { it.first }
+        val kinds = seen.values.map { it.second }.filter { it.isNotEmpty() }.distinct()
+        val hasTag = kinds.any { it.contains("Tag", ignoreCase = true) }
+        sendAlert(if (hasTag) "bt_tag" else "bt_proximity", mapOf(
+            "bt_count" to seen.size,
+            "bt_rssi" to (strongest?.first ?: -127),
+            "bt_kinds" to kinds.joinToString(",").ifEmpty { "necunoscut" }
+        ))
+    }
+
+    // Identifica tipul dispozitivului dupa manufacturer ID din advertising packet.
+    private fun classifyBle(result: ScanResult): String {
+        val mfg = result.scanRecord?.manufacturerSpecificData
+        if (mfg != null) {
+            for (i in 0 until mfg.size()) {
+                when (mfg.keyAt(i)) {
+                    0x004C -> return "Apple/AirTag?"   // Apple (AirTag, iPhone, AirPods)
+                    0x0075 -> return "Samsung/SmartTag?" // Samsung (SmartTag, Galaxy)
+                    0x00E0 -> return "Google"
+                    0x0006 -> return "Microsoft"
+                }
+            }
+        }
+        return ""
+    }
+
+    private fun hasBtScanPerm(): Boolean = if (Build.VERSION.SDK_INT >= 31) {
+        ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.BLUETOOTH_SCAN) ==
+            PackageManager.PERMISSION_GRANTED
+    } else true
+
+    // === Storage plin ===
+    private fun checkStorage() {
+        try {
+            val dir = Storage.baseDir(ctx)
+            val freeMb = dir.usableSpace / 1_000_000L
+            if (freeMb in 0 until STORAGE_MIN_MB) {
+                if (!storageAlerted) {
+                    storageAlerted = true
+                    sendAlert("storage_low", mapOf("free_mb" to freeMb))
+                }
+            } else {
+                storageAlerted = false  // s-a eliberat spatiu -> permite o noua alerta viitoare
+            }
+        } catch (_: Exception) {}
     }
 
     private fun batteryPct(): Int {

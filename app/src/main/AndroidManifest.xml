@@ -18,6 +18,12 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
     <!-- anti-furt: stare SIM (optional — daca nu e acordata, sim_state = UNKNOWN) -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+    <!-- anti-intruziune: scanare BLE periodica (detecteaza prezenta tag-uri/telefoane in zona).
+         neverForLocation => NU cerem permisiune de locatie pentru BT (Android 12+). -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"/>
     <!-- auto-update: instalare APK (un-tap; silentios daca device-owner) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 

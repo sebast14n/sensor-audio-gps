@@ -39,10 +39,20 @@
         android:textColor="#888888"
         android:gravity="center"/>
 
+    <Button
+        android:id="@+id/btnOpenMap"
+        android:layout_width="250dp"
+        android:layout_height="52dp"
+        android:layout_marginTop="28dp"
+        android:text="🛰  VEZI PE HARTĂ"
+        android:textSize="15sp"
+        android:textColor="#FFFFFF"
+        android:backgroundTint="#00695C"/>
+
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
+        android:layout_marginTop="24dp"
         android:textSize="11sp"
         android:textColor="#444444"
         android:gravity="center"

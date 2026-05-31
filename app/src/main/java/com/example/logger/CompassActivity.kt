@@ -52,6 +52,15 @@ class CompassActivity : AppCompatActivity(), SensorEventListener {
         tvTarget    = findViewById(R.id.tvTarget)
         tvTarget.text = "📍 $targetName"
 
+        // Buton: deschide aceeasi destinatie pe harta satelitara (osmdroid, cache offline)
+        findViewById<android.widget.Button>(R.id.btnOpenMap).setOnClickListener {
+            startActivity(android.content.Intent(this, MapActivity::class.java).apply {
+                putExtra("lat", targetLat)
+                putExtra("lon", targetLon)
+                putExtra("name", targetName)
+            })
+        }
+
         sensorManager   = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
