@@ -12,14 +12,14 @@ import java.net.URL
 
 /**
  * Verifica daca exista o versiune mai noua disponibila.
- * Endpoint: https://echo.noze.ro/api/app/latest
+ * Endpoint: https://noze.ro/api/app/latest
  *
  * Returneaza: {latest_version, apk_url, release_notes, mandatory}
  * Compara cu BuildConfig.VERSION_NAME. Daca newer -> dialog cu Download.
  */
 object UpdateChecker {
 
-    private const val ENDPOINT = "https://echo.noze.ro/api/app/latest"
+    private val ENDPOINT = BuildConfig.SERVER_URL + "/api/app/latest"
     private const val PREFS = "bioecho_prefs"
     private const val KEY_DISMISSED_VERSION = "update_dismissed_version"
 

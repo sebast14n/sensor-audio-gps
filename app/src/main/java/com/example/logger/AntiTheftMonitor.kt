@@ -48,7 +48,7 @@ class AntiTheftMonitor(
     private var lastSimState: Int = simState()
 
     private val prefs = ctx.getSharedPreferences("bioecho_prefs", Context.MODE_PRIVATE)
-    private val server = "https://echo.noze.ro"
+    private val server = BuildConfig.SERVER_URL
 
     // --- anti-intruziune BLE + storage (poll periodic) ---
     private val handler = Handler(Looper.getMainLooper())

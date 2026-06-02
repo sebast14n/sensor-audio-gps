@@ -31,7 +31,7 @@ import java.net.URL
  */
 object GoogleLogin {
 
-    private const val BACKEND_URL = "https://echo.noze.ro/auth/google/token"
+    private val BACKEND_URL = BuildConfig.SERVER_URL + "/auth/google/token"
     private const val PREFS = "bioecho_prefs"
 
     /**

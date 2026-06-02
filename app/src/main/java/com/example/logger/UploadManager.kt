@@ -9,7 +9,7 @@ import java.net.URL
 class UploadManager(private val context: Context) {
 
     companion object {
-        const val SERVER = "https://echo.noze.ro"
+        val SERVER = BuildConfig.SERVER_URL
         private const val MAX_RETRIES = 3
     }
 

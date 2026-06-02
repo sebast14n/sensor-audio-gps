@@ -133,7 +133,7 @@ class PoisListActivity : AppCompatActivity() {
         }
         Thread {
             try {
-                val url = URL("https://echo.noze.ro/api/pois/mobile")
+                val url = URL(BuildConfig.SERVER_URL + "/api/pois/mobile")
                 val conn = url.openConnection() as HttpURLConnection
                 conn.setRequestProperty("Authorization", "Bearer $jwt")
                 conn.setRequestProperty("Accept", "application/json")
@@ -308,7 +308,7 @@ class PoisListActivity : AppCompatActivity() {
                 val body = JSONObject().apply {
                     put("name", name); put("lat", lat); put("lon", lon)
                 }
-                val conn = (URL("https://echo.noze.ro/api/pois").openConnection() as HttpURLConnection).apply {
+                val conn = (URL(BuildConfig.SERVER_URL + "/api/pois").openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 10000; readTimeout = 15000
                     doOutput = true
