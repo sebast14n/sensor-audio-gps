@@ -31,6 +31,11 @@ import org.osmdroid.views.overlay.mylocation.IMyLocationConsumer
 import org.osmdroid.views.overlay.mylocation.IMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import org.osmdroid.tileprovider.cachemanager.CacheManager
+import org.osmdroid.tileprovider.MapTileProviderBasic
+import org.osmdroid.views.overlay.TilesOverlay
+import org.json.JSONArray
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MapActivity : AppCompatActivity() {
 
@@ -99,6 +104,7 @@ class MapActivity : AppCompatActivity() {
             trackHandler.postDelayed(trackRefresh, 4000)
         } else {
             addDestinationMarker()
+            loadAllPois()
             btnCompassFromMap.setOnClickListener {
                 startActivity(Intent(this, CompassActivity::class.java).apply {
                     putExtra("lat", destLat); putExtra("lon", destLon); putExtra("name", destName)
@@ -217,6 +223,24 @@ class MapActivity : AppCompatActivity() {
         mapView.setMultiTouchControls(true)
         mapView.controller.setZoom(16.0)
         mapView.controller.setCenter(GeoPoint(destLat, destLon))
+
+        // strat de etichete (denumiri locuri/drumuri) peste satelit — pentru orientare
+        val labels = object : OnlineTileSourceBase(
+            "EsriRefLabels", 0, 19, 256, ".png",
+            arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/"),
+            "Esri Reference",
+            TileSourcePolicy(2, TileSourcePolicy.FLAG_NO_PREVENTIVE or TileSourcePolicy.FLAG_USER_AGENT_NORMALIZED or TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL)
+        ) {
+            override fun getTileURLString(i: Long): String {
+                val z = MapTileIndex.getZoom(i); val x = MapTileIndex.getX(i); val y = MapTileIndex.getY(i)
+                return "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/$z/$y/$x"
+            }
+        }
+        val labelsOverlay = TilesOverlay(MapTileProviderBasic(applicationContext, labels), applicationContext).apply {
+            loadingBackgroundColor = Color.TRANSPARENT
+            loadingLineColor = Color.TRANSPARENT
+        }
+        mapView.overlays.add(labelsOverlay)
     }
 
     @Suppress("DEPRECATION")
@@ -313,7 +337,40 @@ class MapActivity : AppCompatActivity() {
             snippet = "%.6f, %.6f".format(destLat, destLon)
         }
         mapView.overlays.add(marker)
+        marker.showInfoWindow()   // numele destinației vizibil permanent
         mapView.invalidate()
+    }
+
+    /** Încarcă toate POI-urile userului și le afișează ca etichete cu nume (orientare pe hartă). */
+    private fun loadAllPois() {
+        val token = getSharedPreferences("bioecho_prefs", MODE_PRIVATE).getString("jwt_token", null) ?: return
+        Thread {
+            try {
+                val conn = (URL("${UploadManager.SERVER}/api/pois/mobile").openConnection() as HttpURLConnection)
+                conn.setRequestProperty("Authorization", "Bearer $token")
+                conn.connectTimeout = 8000; conn.readTimeout = 8000
+                if (conn.responseCode != 200) return@Thread
+                val arr = JSONArray(conn.inputStream.bufferedReader().readText())
+                val markers = ArrayList<Marker>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val lat = o.getDouble("lat"); val lon = o.getDouble("lon")
+                    if (Math.abs(lat - destLat) < 1e-6 && Math.abs(lon - destLon) < 1e-6) continue  // sare peste destinație
+                    val nm = o.optString("name", "POI")
+                    markers.add(Marker(mapView).apply {
+                        position = GeoPoint(lat, lon)
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        title = nm
+                        snippet = "%.6f, %.6f".format(lat, lon)
+                        setTextIcon(nm)   // etichetă cu numele, vizibilă
+                    })
+                }
+                runOnUiThread {
+                    markers.forEach { mapView.overlays.add(it) }
+                    mapView.invalidate()
+                }
+            } catch (_: Exception) {}
+        }.start()
     }
 
     override fun onResume() {
