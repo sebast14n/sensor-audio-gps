@@ -339,19 +339,46 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /** Actiuni per inregistrare: Asculta / Upload / Sterge. */
+    /** Actiuni per inregistrare: Harta / Asculta / Upload / Sterge. */
     private fun showSessionActions(dir: File) {
+        val hasLoc = sessionLatLon(dir) != null
+        val mapLabel = if (hasLoc) "🗺  Unde s-a înregistrat" else "🗺  Unde s-a înregistrat (fără GPS)"
         AlertDialog.Builder(this)
             .setTitle(formatTimestamp(dir.name.removePrefix("session_")))
-            .setItems(arrayOf("▶  Ascultă", "⬆  Upload", "🗑  Șterge")) { _, which ->
+            .setItems(arrayOf(mapLabel, "▶  Ascultă", "⬆  Upload", "🗑  Șterge")) { _, which ->
                 when (which) {
-                    0 -> playSession(dir)
-                    1 -> doUpload(dir)
-                    2 -> confirmDeleteSession(dir)
+                    0 -> showSessionOnMap(dir)
+                    1 -> playSession(dir)
+                    2 -> doUpload(dir)
+                    3 -> confirmDeleteSession(dir)
                 }
             }
             .setNegativeButton("Înapoi") { _, _ -> showRecordingsManager() }
             .show()
+    }
+
+    /** Primul punct GPS (lat,lon) al sesiunii, citit din track_*.gpx. null daca nu exista. */
+    private fun sessionLatLon(dir: File): Pair<Double, Double>? {
+        return try {
+            val gpx = dir.listFiles()?.firstOrNull { it.name.endsWith(".gpx") } ?: return null
+            val m = Regex("<trkpt[^>]*lat=\"([-\\d.]+)\"[^>]*lon=\"([-\\d.]+)\"")
+                .find(gpx.readText()) ?: return null
+            val lat = m.groupValues[1].toDouble(); val lon = m.groupValues[2].toDouble()
+            if (lat == 0.0 && lon == 0.0) null else Pair(lat, lon)
+        } catch (_: Exception) { null }
+    }
+
+    /** Deschide harta (satelit + cache offline) centrata pe locul inregistrarii. */
+    private fun showSessionOnMap(dir: File) {
+        val ll = sessionLatLon(dir)
+        if (ll == null) {
+            Toast.makeText(this, "Sesiunea nu are coordonate GPS salvate.", Toast.LENGTH_SHORT).show()
+            showSessionActions(dir); return
+        }
+        startActivity(Intent(this, MapActivity::class.java).apply {
+            putExtra("lat", ll.first); putExtra("lon", ll.second)
+            putExtra("name", "📍 Înregistrare ${formatTimestamp(dir.name.removePrefix("session_"))}")
+        })
     }
 
     /** Reda primul fisier audio din sesiune (verificare rapida ca s-a captat). */
