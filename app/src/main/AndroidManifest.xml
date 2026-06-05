@@ -65,6 +65,11 @@
             android:exported="false"
             android:label="Găsește senzorul"/>
 
+        <activity
+            android:name=".RecordingsActivity"
+            android:exported="false"
+            android:label="Înregistrări"/>
+
         <service
             android:name=".RecordingService"
             android:foregroundServiceType="microphone|location"

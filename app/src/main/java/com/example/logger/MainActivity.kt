@@ -98,7 +98,7 @@ class MainActivity : AppCompatActivity() {
             // Permite si destinatie manuala ad-hoc din lista.
             startActivity(Intent(this, PoisListActivity::class.java))
         }
-        btnRecordings.setOnClickListener { showRecordingsManager() }
+        btnRecordings.setOnClickListener { startActivity(Intent(this, RecordingsActivity::class.java)) }
 
         // Solicita exceptare de la battery optimization la prima rulare
         requestBatteryOptimizationExemption()
@@ -437,9 +437,9 @@ class MainActivity : AppCompatActivity() {
         tvUploadStatus.text = "Se pregătește upload-ul..."
 
         uploadManager.uploadSessionAsync(sessionDir, object : UploadManager.ProgressCallback {
-            override fun onProgress(current: Int, total: Int, fileName: String) {
+            override fun onProgress(fileIndex: Int, fileCount: Int, fileName: String, bytesDone: Long, bytesTotal: Long) {
                 runOnUiThread {
-                    tvUploadStatus.text = "Se încarcă $current/$total: $fileName"
+                    tvUploadStatus.text = "Se încarcă $fileIndex/$fileCount: $fileName"
                 }
             }
 
