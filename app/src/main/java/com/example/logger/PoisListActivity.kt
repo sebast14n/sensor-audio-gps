@@ -88,14 +88,81 @@ class PoisListActivity : AppCompatActivity() {
         btnRow.addView(btnRefresh)
         btnRow.addView(btnAddManual)
 
+        val btnFind = Button(this).apply {
+            text = "🔍 Găsește senzorul prin BLE"
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = 8 }
+            setOnClickListener { startActivity(Intent(this@PoisListActivity, FindSensorActivity::class.java)) }
+        }
+
         root.addView(title)
         root.addView(tvStatus)
         root.addView(listView)
         root.addView(btnRow)
+        root.addView(btnFind)
         setContentView(root)
 
         startLocationUpdates()
         loadPois()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        syncPendingPois()    // incearca sa trimita punctele salvate offline cand revii (poate ai net acum)
+    }
+
+    // ── Coada OFFLINE de POI-uri: daca nu ai net la adaugare, se salveaza local si se ──
+    // ── sincronizeaza automat cand telefonul are din nou acces la server. ──
+    private fun pendingPois(): JSONArray = try {
+        JSONArray(getSharedPreferences("bioecho_prefs", MODE_PRIVATE).getString("pending_pois", "[]"))
+    } catch (_: Exception) { JSONArray() }
+
+    private fun setPending(arr: JSONArray) {
+        getSharedPreferences("bioecho_prefs", MODE_PRIVATE).edit()
+            .putString("pending_pois", arr.toString()).apply()
+    }
+
+    private fun enqueuePoi(name: String, lat: Double, lon: Double) {
+        val arr = pendingPois()
+        arr.put(JSONObject().apply { put("name", name); put("lat", lat); put("lon", lon) })
+        setPending(arr)
+    }
+
+    private fun postPoi(p: JSONObject, jwt: String): Boolean {
+        val conn = (URL(BuildConfig.SERVER_URL + "/api/pois").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"; connectTimeout = 10000; readTimeout = 15000; doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Authorization", "Bearer $jwt")
+        }
+        conn.outputStream.use {
+            it.write(JSONObject().apply {
+                put("name", p.getString("name")); put("lat", p.getDouble("lat")); put("lon", p.getDouble("lon"))
+            }.toString().toByteArray())
+        }
+        val ok = conn.responseCode in 200..299
+        try { conn.inputStream.use { it.readBytes() } } catch (_: Exception) {}
+        conn.disconnect()
+        return ok
+    }
+
+    private fun syncPendingPois() {
+        val arr = pendingPois()
+        if (arr.length() == 0) return
+        val jwt = getSharedPreferences("bioecho_prefs", MODE_PRIVATE).getString("jwt_token", null)
+        if (jwt.isNullOrBlank()) return
+        Thread {
+            val remain = JSONArray(); var sent = 0
+            for (i in 0 until arr.length()) {
+                val p = arr.getJSONObject(i)
+                val ok = try { postPoi(p, jwt) } catch (_: Exception) { false }
+                if (ok) sent++ else remain.put(p)
+            }
+            setPending(remain)
+            if (sent > 0) runOnUiThread {
+                Toast.makeText(this, "✓ $sent punct(e) sincronizate", Toast.LENGTH_SHORT).show()
+                loadPois()
+            }
+        }.start()
     }
 
     private fun startLocationUpdates() {
@@ -147,7 +214,9 @@ class PoisListActivity : AppCompatActivity() {
                     for (i in 0 until arr.length()) list.add(arr.getJSONObject(i))
                     runOnUiThread {
                         pois = list
-                        tvStatus.text = "${list.size} puncte sincronizate"
+                        val pend = pendingPois().length()
+                        tvStatus.text = "${list.size} puncte sincronizate" +
+                            (if (pend > 0) "  ·  ⏳ $pend în așteptare" else "")
                         renderList()
                         precacheSatellite(list)   // pre-incarca harta satelit offline (auto, pe WiFi)
                     }
@@ -294,41 +363,29 @@ class PoisListActivity : AppCompatActivity() {
             .show()
     }
 
-    /** Salveaza POI in zona privata a userului: POST /api/pois -> apare pe harta web,
-     *  se poate sterge de acolo. Esecul de retea e non-fatal (doar toast). */
+    /** Salveaza POI in zona privata. Daca ai net -> POST direct. Daca NU (offline / eroare) ->
+     *  se salveaza in coada locala si se sincronizeaza automat cand telefonul are din nou net. */
     private fun savePoi(name: String, lat: Double, lon: Double) {
-        val prefs = getSharedPreferences("bioecho_prefs", MODE_PRIVATE)
-        val jwt = prefs.getString("jwt_token", null)
+        val jwt = getSharedPreferences("bioecho_prefs", MODE_PRIVATE).getString("jwt_token", null)
         if (jwt.isNullOrBlank()) {
-            Toast.makeText(this, "⚠ Neautentificat — punctul nu a fost salvat", Toast.LENGTH_SHORT).show()
+            enqueuePoi(name, lat, lon)
+            Toast.makeText(this, "💾 Salvat local: $name (neautentificat — se trimite după login)", Toast.LENGTH_LONG).show()
+            tvStatus.text = "⏳ ${pendingPois().length()} punct(e) în așteptare (offline)"
             return
         }
         Thread {
-            try {
-                val body = JSONObject().apply {
-                    put("name", name); put("lat", lat); put("lon", lon)
+            val ok = try {
+                postPoi(JSONObject().apply { put("name", name); put("lat", lat); put("lon", lon) }, jwt)
+            } catch (_: Exception) { false }
+            runOnUiThread {
+                if (ok) {
+                    Toast.makeText(this, "✓ Punct salvat: $name", Toast.LENGTH_SHORT).show()
+                    loadPois()
+                } else {
+                    enqueuePoi(name, lat, lon)
+                    Toast.makeText(this, "📡 Fără net — salvat local: $name. Se sincronizează automat când ai internet.", Toast.LENGTH_LONG).show()
+                    tvStatus.text = "⏳ ${pendingPois().length()} punct(e) în așteptare (offline)"
                 }
-                val conn = (URL(BuildConfig.SERVER_URL + "/api/pois").openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 10000; readTimeout = 15000
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/json")
-                    setRequestProperty("Authorization", "Bearer $jwt")
-                }
-                conn.outputStream.use { it.write(body.toString().toByteArray()) }
-                val ok = conn.responseCode in 200..299
-                try { conn.inputStream.use { it.readBytes() } } catch (_: Exception) {}
-                conn.disconnect()
-                runOnUiThread {
-                    if (ok) {
-                        Toast.makeText(this, "✓ Punct salvat: $name", Toast.LENGTH_SHORT).show()
-                        loadPois()  // re-sync lista (va include noul punct)
-                    } else {
-                        Toast.makeText(this, "⚠ Server: HTTP ${conn.responseCode} — nesalvat", Toast.LENGTH_LONG).show()
-                    }
-                }
-            } catch (e: Exception) {
-                runOnUiThread { Toast.makeText(this, "⚠ Rețea: ${e.message} — nesalvat", Toast.LENGTH_LONG).show() }
             }
         }.start()
     }
