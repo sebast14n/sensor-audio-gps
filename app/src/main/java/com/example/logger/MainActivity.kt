@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnAuth: Button
     private lateinit var btnCompass: Button
     private lateinit var btnRecordings: Button
+    private lateinit var btnFindSensor: Button
     private lateinit var tvStatus: TextView
     private lateinit var tvUploadStatus: TextView
     private lateinit var tvPath: TextView
@@ -63,6 +64,7 @@ class MainActivity : AppCompatActivity() {
         btnAuth          = findViewById(R.id.btnAuth)
         btnCompass       = findViewById(R.id.btnCompass)
         btnRecordings    = findViewById(R.id.btnRecordings)
+        btnFindSensor    = findViewById(R.id.btnFindSensor)
         tvStatus      = findViewById(R.id.tvStatus)
         tvUploadStatus = findViewById(R.id.tvUploadStatus)
         tvPath        = findViewById(R.id.tvPath)
@@ -99,6 +101,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, PoisListActivity::class.java))
         }
         btnRecordings.setOnClickListener { startActivity(Intent(this, RecordingsActivity::class.java)) }
+        btnFindSensor.setOnClickListener { startActivity(Intent(this, FindSensorActivity::class.java)) }
 
         // Solicita exceptare de la battery optimization la prima rulare
         requestBatteryOptimizationExemption()

@@ -58,6 +58,27 @@ class FindSensorActivity : AppCompatActivity() {
     private var ema = -100.0          // RSSI mediat exponential (pt netezire)
     private var emaPrev = -100.0
     private var lastBeep = 0L
+    private lateinit var btnMark: Button
+
+    // "Clasa senzor": prefixele MAC (OUI = primele 3 octeti) ale senzorilor cunoscuti.
+    // Se invata: marchezi un senzor o data -> toti cei cu acelasi OUI sunt recunoscuti automat.
+    private val sensorOuis = HashSet<String>()
+    private fun oui(addr: String) = if (addr.length >= 8) addr.substring(0, 8).uppercase() else addr.uppercase()
+    /** E (probabil) un senzor BLE? Dupa OUI invatat SAU dupa numele advertised. */
+    private fun isSensor(addr: String, name: String): Boolean {
+        if (oui(addr) in sensorOuis) return true
+        val n = name.lowercase()
+        return listOf("song", "meter", "smm", "smu", "audiomoth", "wildlife", "bat", "bioecho", "sensor", "senzor")
+            .any { n.contains(it) }
+    }
+    private fun loadOuis() {
+        getSharedPreferences("ble_finder", MODE_PRIVATE).getString("sensor_ouis", "")
+            ?.split(",")?.filter { it.isNotBlank() }?.forEach { sensorOuis.add(it) }
+    }
+    private fun saveOuis() {
+        getSharedPreferences("ble_finder", MODE_PRIVATE).edit()
+            .putString("sensor_ouis", sensorOuis.joinToString(",")).apply()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,9 +106,13 @@ class FindSensorActivity : AppCompatActivity() {
         tvTrend = TextView(this).apply { textSize = 22f; setPadding(0, 4, 0, 4) }
         bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
         tvRssi = TextView(this).apply { textSize = 12f; setTextColor(0xFF9E9E9E.toInt()); setPadding(0, 6, 0, 0) }
+        btnMark = Button(this).apply {
+            text = "📌 E senzor (învață clasa MAC)"
+            setOnClickListener { markTargetAsSensor() }
+        }
         btnBack = Button(this).apply { text = "← Altă țintă"; setOnClickListener { clearTarget() } }
         homing.addView(tvName); homing.addView(tvDist); homing.addView(tvTrend)
-        homing.addView(bar); homing.addView(tvRssi); homing.addView(btnBack)
+        homing.addView(bar); homing.addView(tvRssi); homing.addView(btnMark); homing.addView(btnBack)
         root.addView(homing)
 
         listView = ListView(this).apply {
@@ -105,6 +130,7 @@ class FindSensorActivity : AppCompatActivity() {
             order.getOrNull(pos)?.let { setTarget(it) }
         }
 
+        loadOuis()
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
         try { tone = ToneGenerator(AudioManager.STREAM_MUSIC, 90) } catch (_: Exception) {}
 
@@ -177,19 +203,40 @@ class FindSensorActivity : AppCompatActivity() {
     }
 
     private fun renderList() {
-        order = devices.entries.sortedByDescending { it.value.rssi }.map { it.key }
+        // senzorii (clasa MAC cunoscuta / nume) sus, apoi dupa putere (cel mai tare = aproape)
+        order = devices.entries.sortedWith(
+            compareByDescending<Map.Entry<String, Dev>> { isSensor(it.key, it.value.name) }
+                .thenByDescending { it.value.rssi }
+        ).map { it.key }
+        val sensorCount = order.count { isSensor(it, devices[it]!!.name) }
         val items = order.map { addr ->
             val d = devices[addr]!!
-            "📡  ${d.name}\n     ${d.rssi} dBm · ~${distM(d.rssi.toDouble())} · $addr"
+            val tag = if (isSensor(addr, d.name)) "🛰 SENZOR  " else "📡  "
+            "$tag${d.name}\n     ${d.rssi} dBm · ~${distM(d.rssi.toDouble())} · $addr"
         }
         listView.adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, items) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                 val v = super.getView(position, convertView, parent) as TextView
-                v.setTextColor(0xFFE0E0E0.toInt()); v.textSize = 13f
+                val addr = order.getOrNull(position)
+                val isS = addr != null && isSensor(addr, devices[addr]?.name ?: "")
+                v.setTextColor(if (isS) 0xFF80CBC4.toInt() else 0xFFE0E0E0.toInt())
+                v.textSize = 13f
                 return v
             }
         }
-        tvStatus.text = "${devices.size} dispozitive. Apasă pe senzorul căutat."
+        tvStatus.text = "${devices.size} dispozitive (${sensorCount} 🛰 senzor). Apasă pe cel căutat."
+    }
+
+    /** Invata clasa MAC (OUI) a tintei curente -> toti senzorii cu acelasi prefix sunt recunoscuti. */
+    private fun markTargetAsSensor() {
+        val addr = targetAddr ?: return
+        val o = oui(addr)
+        if (sensorOuis.add(o)) {
+            saveOuis()
+            Toast.makeText(this, "Clasă senzor învățată: $o*", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Deja marcat ca senzor ($o*)", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun setTarget(addr: String) {
