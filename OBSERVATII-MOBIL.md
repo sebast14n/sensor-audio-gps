@@ -45,6 +45,7 @@ Regresie față de v1.5.3 (atunci tap-ul deschidea direct meniul Ascultă/Upload
 **Acum:** `play()` = `MediaPlayer` + un toast „▶ nume"; fără controale, fără indicator de stare/progres. (`RecordingsActivity.kt:222`, `MainActivity.kt:388 playSession`.)
 **Fix propus:** un mini-player vizibil (bară jos / dialog persistent) cu ▶/⏸/⏹ + timp scurs/total + numele fișierului; se actualizează la `onCompletion`. Aplicat în ambele locuri (RecordingsActivity + MainActivity).
 **✅ Decizie (user):** player **peste o hartă**, cu un marker care **se mișcă pe traseul GPX sincronizat cu redarea** — la transect, pe măsură ce „se aud punctele". La senzor fix (un punct / fără traseu) = marker static + player simplu. Sursa poziției = trackpoint-urile cu timp din `track_*.gpx`, corelate cu poziția curentă din audio (segmentele `audio_NNN_…` au timestamp). Reutilizează `MapActivity`.
+**✅ LIVRAT 1.9.3:** `PlaybackActivity` — hartă osmdroid + traseu GPX (polilinie) + marker care avansează pe traseu după progresul global al redării (segment + poziție) + mini-player vizibil (⏮ ⏯ ⏹ ⏭ + SeekBar + timp + nume fișier + navigare segmente). „Ascultă" (RecordingsActivity + MainActivity) deschide acum PlaybackActivity. Sincronizare = mapare proporțională progres→traseu (suficient pt transect la pas constant; nu sync exact pe timestamp GPX — follow-up dacă e nevoie).
 
 ---
 

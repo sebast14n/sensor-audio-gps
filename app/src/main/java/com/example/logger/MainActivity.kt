@@ -358,7 +358,8 @@ class MainActivity : AppCompatActivity() {
             .setItems(arrayOf(mapLabel, "▶  Ascultă", "⬆  Upload", "🗑  Șterge")) { _, which ->
                 when (which) {
                     0 -> showSessionOnMap(dir)
-                    1 -> playSession(dir)
+                    1 -> startActivity(Intent(this, PlaybackActivity::class.java)
+                            .putExtra("session_path", dir.absolutePath))
                     2 -> doUpload(dir)
                     3 -> confirmDeleteSession(dir)
                 }

@@ -213,7 +213,8 @@ class RecordingsActivity : AppCompatActivity() {
                 "▶ Ascultă", "⬆ Upload doar asta", "🗑 Șterge")) { _, w ->
                 when (w) {
                     0 -> showOnMap(dir)
-                    1 -> play(dir)
+                    1 -> startActivity(Intent(this, PlaybackActivity::class.java)
+                            .putExtra("session_path", dir.absolutePath))
                     2 -> { selected.clear(); selected.add(dir.name); uploadSelected() }
                     3 -> { selected.clear(); selected.add(dir.name); deleteSelected() }
                 }
