@@ -3,6 +3,8 @@ package com.example.logger
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
@@ -57,6 +59,10 @@ class RecordingService : Service() {
     // WakeLock — tinut DOAR cat timp inregistram efectiv (nu permanent)
     private var wakeLock: PowerManager.WakeLock? = null
     private var antiTheft: AntiTheftMonitor? = null
+    private var batteryTimer: Timer? = null
+    private val isoUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).also {
+        it.timeZone = TimeZone.getTimeZone("UTC")
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -87,7 +93,36 @@ class RecordingService : Service() {
         }
 
         startSession()
+        startBatteryLog()
         return START_STICKY
+    }
+
+    /** Logger baterie: la 5 min scrie un rand in /BioEcho/battery_log.csv pt analiza consumului
+     *  (charge_counter µAh = consum exact intre 2 puncte). Pt optimizarea programului/autonomiei. */
+    private fun startBatteryLog() {
+        batteryTimer?.cancel()
+        batteryTimer = Timer().also {
+            it.scheduleAtFixedRate(object : TimerTask() {
+                override fun run() { try { logBatteryRow() } catch (_: Exception) {} }
+            }, 0L, 5 * 60 * 1000L)
+        }
+    }
+
+    private fun logBatteryRow() {
+        val bm = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return
+        val cc = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)   // µAh ramasi
+        val cur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)     // µA (− = descarcare)
+        val lvl = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)        // %
+        val bi = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val volt = bi?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
+        val temp = bi?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+        val status = bi?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val charging = if (status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                           status == BatteryManager.BATTERY_STATUS_FULL) 1 else 0
+        val f = File(Storage.baseDir(this), "battery_log.csv")
+        if (!f.exists()) f.appendText("utc,charge_uah,current_ua,level,temp_c,voltage_mv,charging,recording,session\n")
+        f.appendText("${isoUtc.format(Date())},$cc,$cur,$lvl,${if (temp > 0) temp / 10.0 else ""}," +
+            "$volt,$charging,${if (recordingActive) 1 else 0},${sessionDir?.name ?: ""}\n")
     }
 
     override fun onDestroy() {
@@ -95,6 +130,7 @@ class RecordingService : Service() {
         isRunning = false
         currentGpxPath = null
         windowTimer?.cancel()
+        batteryTimer?.cancel()
         pauseRecording()
         closeGpx()
         antiTheft?.stop()

@@ -66,6 +66,11 @@
             android:label="Găsește senzorul"/>
 
         <activity
+            android:name=".DiagnosticActivity"
+            android:exported="false"
+            android:label="Diagnostic"/>
+
+        <activity
             android:name=".RecordingsActivity"
             android:exported="false"
             android:label="Înregistrări"/>

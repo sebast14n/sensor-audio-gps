@@ -37,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnCompass: Button
     private lateinit var btnRecordings: Button
     private lateinit var btnFindSensor: Button
+    private lateinit var btnDiagnostic: Button
     private lateinit var tvStatus: TextView
     private lateinit var tvUploadStatus: TextView
     private lateinit var tvPath: TextView
@@ -65,6 +66,7 @@ class MainActivity : AppCompatActivity() {
         btnCompass       = findViewById(R.id.btnCompass)
         btnRecordings    = findViewById(R.id.btnRecordings)
         btnFindSensor    = findViewById(R.id.btnFindSensor)
+        btnDiagnostic    = findViewById(R.id.btnDiagnostic)
         tvStatus      = findViewById(R.id.tvStatus)
         tvUploadStatus = findViewById(R.id.tvUploadStatus)
         tvPath        = findViewById(R.id.tvPath)
@@ -73,7 +75,8 @@ class MainActivity : AppCompatActivity() {
 
         val saveDir = Storage.baseDir(this).absolutePath
         tvPath.text = "Fișierele se salvează în:\n$saveDir" +
-            (if (Storage.canUsePublic()) "\n✓ păstrate și după dezinstalare" else "\n⚠ doar privat (acordă „Access all files”)")
+            (if (Storage.canUsePublic()) "\n✓ păstrate și după dezinstalare" else "\n⚠ doar privat (acordă „Access all files”)") +
+            "\nBioEcho v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
 
         // Load saved mode preference
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
@@ -102,20 +105,24 @@ class MainActivity : AppCompatActivity() {
         }
         btnRecordings.setOnClickListener { startActivity(Intent(this, RecordingsActivity::class.java)) }
         btnFindSensor.setOnClickListener { startActivity(Intent(this, FindSensorActivity::class.java)) }
+        btnDiagnostic.setOnClickListener { startActivity(Intent(this, DiagnosticActivity::class.java)) }
 
         // Solicita exceptare de la battery optimization la prima rulare
         requestBatteryOptimizationExemption()
         // Solicita "All files access" o singura data (inregistrari in folder public)
         requestStorageOnce()
 
-        // Verifica daca exista o versiune mai noua (silentios la esec)
-        // Verificare versiune DOAR o data per instalare (silentios) — nu la fiecare pornire.
-        // (push real -> in viitor prin C&C-ul de control la distanta, v2.0)
-        val pfUpd = getSharedPreferences(PREFS, MODE_PRIVATE)
-        if (pfUpd.getInt("update_checked_vc", -1) != BuildConfig.VERSION_CODE) {
-            pfUpd.edit().putInt("update_checked_vc", BuildConfig.VERSION_CODE).apply()
-            UpdateChecker.checkAsync(this, verbose = false)
-        }
+        // Verifica update DOAR la pornire (cold start onCreate) si DOAR daca exista internet
+        // (silentios la esec). Push real -> in viitor prin C&C-ul de control la distanta, v2.0.
+        if (hasNetwork()) UpdateChecker.checkAsync(this, verbose = false)
+    }
+
+    /** Exista conexiune la internet acum? (pt verificarea update + flush alerte). */
+    private fun hasNetwork(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val net = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(net) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     override fun onResume() {

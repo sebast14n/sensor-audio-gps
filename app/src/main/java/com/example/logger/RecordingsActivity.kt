@@ -114,7 +114,8 @@ class RecordingsActivity : AppCompatActivity() {
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 }
                 row.addView(cb); row.addView(tv)
-                row.setOnClickListener { cb.isChecked = !cb.isChecked; toggleSel(dir.name) }
+                // tap pe rand = meniu actiuni (Asculta/Harta/Upload/Sterge); bifa = selectie pt lot
+                row.setOnClickListener { singleActions(dir) }
                 row.setOnLongClickListener { singleActions(dir); true }
                 return row
             }

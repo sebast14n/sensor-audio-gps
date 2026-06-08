@@ -94,7 +94,7 @@ class MapActivity : AppCompatActivity() {
             updateCenterLabel()
         } else if (trackMode) {
             btnCompassFromMap.text = "📍 Eu"
-            btnPrecache.text = "🛰 Cache 5km"
+            btnPrecache.text = "🛰 Cache 1km"
             btnCompassFromMap.setOnClickListener {
                 (myLocationOverlay.myLocation ?: lastLocation?.let { GeoPoint(it.latitude, it.longitude) })
                     ?.let { mapView.controller.animateTo(it) }
@@ -164,15 +164,15 @@ class MapActivity : AppCompatActivity() {
         val loc = myLocationOverlay.myLocation
             ?: lastLocation?.let { GeoPoint(it.latitude, it.longitude) }
         if (loc == null) { Toast.makeText(this, "Aștept locația GPS...", Toast.LENGTH_SHORT).show(); return }
-        val delta = 0.025   // ~2.5 km -> casuta 5x5 km
+        val delta = 0.005   // ~0.55 km -> casuta ~1x1 km (suficient, se incarca rapid)
         val box = BoundingBox(loc.latitude + delta, loc.longitude + delta,
             loc.latitude - delta, loc.longitude - delta)
         val cm = CacheManager(mapView)
         val total = cm.possibleTilesInArea(box, 13, 16)
-        Toast.makeText(this, "Cache satelit 5×5km ($total tiles)...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Cache satelit 1×1km ($total tiles)...", Toast.LENGTH_SHORT).show()
         cm.downloadAreaAsync(this, box, 13, 16, object : CacheManager.CacheManagerCallback {
             override fun onTaskComplete() {
-                runOnUiThread { Toast.makeText(this@MapActivity, "✓ Cache 5km salvat offline", Toast.LENGTH_SHORT).show() }
+                runOnUiThread { Toast.makeText(this@MapActivity, "✓ Cache 1km salvat offline", Toast.LENGTH_SHORT).show() }
             }
             override fun updateProgress(progress: Int, currentZoomLevel: Int, zoomMin: Int, zoomMax: Int) {}
             override fun downloadStarted() {}
