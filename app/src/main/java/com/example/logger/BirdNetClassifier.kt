@@ -25,6 +25,10 @@ class BirdNetClassifier private constructor(
 ) {
     val inputSamples = 144000   // 3.0 s @ 48 kHz
 
+    /** Daca e setat (lungime = outSize), restrange clasificarea la speciile permise
+     *  (filtru geografic, ex. fauna din Romania). null = toate cele 6522 specii. */
+    @Volatile var allowedMask: BooleanArray? = null
+
     private val inBuf: ByteBuffer =
         ByteBuffer.allocateDirect(4 * inputSamples).order(ByteOrder.nativeOrder())
     private val outBuf = Array(1) { FloatArray(outSize) }
@@ -56,7 +60,9 @@ class BirdNetClassifier private constructor(
         val k = if (topK < 1) 1 else topK
         val bestIdx = IntArray(k) { -1 }
         val bestScore = FloatArray(k) { Float.NEGATIVE_INFINITY }
+        val mask = allowedMask
         for (j in logits.indices) {
+            if (mask != null && j < mask.size && !mask[j]) continue   // filtru geografic
             val s = sigmoid(logits[j])
             if (s > bestScore[k - 1]) {
                 var p = k - 1
@@ -83,8 +89,9 @@ class BirdNetClassifier private constructor(
     fun close() { try { interpreter.close() } catch (_: Exception) {} }
 
     companion object {
-        /** Incarca modelul (.tflite, memory-mapped) + etichetele (o linie/clasa, ordine = index). */
-        fun load(modelFile: File, labelsFile: File, threads: Int = 2): BirdNetClassifier {
+        /** Incarca modelul (.tflite, memory-mapped) + etichetele (o linie/clasa, ordine = index).
+         *  allowedFile (optional) = indici de clase permise (un int/linie) -> filtru geografic. */
+        fun load(modelFile: File, labelsFile: File, allowedFile: File? = null, threads: Int = 2): BirdNetClassifier {
             val opts = Interpreter.Options().apply { setNumThreads(threads) }
             val mapped = FileInputStream(modelFile).use { fis ->
                 fis.channel.map(FileChannel.MapMode.READ_ONLY, 0, fis.channel.size())
@@ -97,7 +104,18 @@ class BirdNetClassifier private constructor(
             val lines = ArrayList<String>(raw.size)
             for (l in raw) lines.add(l)
             while (lines.isNotEmpty() && lines.last().isBlank()) lines.removeAt(lines.size - 1)
-            return BirdNetClassifier(interp, lines, outN)
+            val c = BirdNetClassifier(interp, lines, outN)
+            if (allowedFile != null && allowedFile.exists()) {
+                try {
+                    val mask = BooleanArray(outN)
+                    for (ln in allowedFile.readText().split("\n")) {
+                        val i = ln.trim().toIntOrNull() ?: continue
+                        if (i in 0 until outN) mask[i] = true
+                    }
+                    if (mask.any { it }) c.allowedMask = mask
+                } catch (_: Exception) {}
+            }
+            return c
         }
     }
 }

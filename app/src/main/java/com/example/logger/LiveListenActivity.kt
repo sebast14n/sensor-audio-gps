@@ -51,11 +51,12 @@ class LiveListenActivity : AppCompatActivity() {
     private val SR = 48000
     private val WIN = 144000     // 3.0 s
     private val HOP = 72000      // 1.5 s -> actualizare ~ la 1.5 s
-    private val CONFIRM = 0.5f   // prag pentru a adauga in lista de sesiune
+    private val CONFIRM = 0.20f  // prag adaugare in sesiune (permisiv: BirdNET da des 0.2-0.4 pt pasari reale)
 
     private val modelDir get() = File(filesDir, "birdnet")
     private val modelFile get() = File(modelDir, "model.tflite")
     private val labelsFile get() = File(modelDir, "labels.txt")
+    private val allowedFile get() = File(modelDir, "allowed_ro.txt")   // filtru specii Romania
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,7 +70,7 @@ class LiveListenActivity : AppCompatActivity() {
         }
 
         root.addView(TextView(this).apply {
-            text = "Ține telefonul spre sursa sunetului. Identificare aproximativă, pe telefon (ca Merlin) — confirm-o mereu."
+            text = "Ține telefonul spre sursa sunetului. Specii limitate la fauna din România. Identificare aproximativă, pe telefon (ca Merlin) — confirm-o mereu."
             setTextColor(0xFFB0BEC5.toInt()); textSize = 12f
             setPadding(0, 0, 0, dp(10))
         })
@@ -168,7 +169,7 @@ class LiveListenActivity : AppCompatActivity() {
         // 1) modelul (mapare + init interpreter) — pe acest thread, nu pe UI
         if (classifier == null) {
             try {
-                classifier = BirdNetClassifier.load(modelFile, labelsFile, threads = 2)
+                classifier = BirdNetClassifier.load(modelFile, labelsFile, allowedFile, threads = 2)
             } catch (e: Exception) {
                 runOnUiThread {
                     tvStatus.text = "⚠ Nu pot încărca modelul: ${e.message?.take(80)}"
@@ -300,9 +301,17 @@ class LiveListenActivity : AppCompatActivity() {
         modelFile.exists() && modelFile.length() == MODEL_BYTES && labelsFile.exists() && labelsFile.length() > 1000L
 
     private fun ensureModel(onReady: () -> Unit) {
-        if (modelReady()) { onReady(); return }
-        modelDir.mkdirs()
         val base = BuildConfig.SERVER_URL
+        if (modelReady() && allowedFile.exists()) { onReady(); return }
+        modelDir.mkdirs()
+        // modelul e deja descarcat (versiune veche) -> ia doar lista RO (mica), apoi continua
+        if (modelReady() && !allowedFile.exists()) {
+            Thread {
+                try { downloadTo("$base/static/birdnet/allowed_ro.txt", allowedFile) { _, _ -> } } catch (_: Exception) {}
+                runOnUiThread { if (!isFinishing && !isDestroyed) onReady() }
+            }.start()
+            return
+        }
 
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(16), dp(24), 0)
@@ -329,6 +338,7 @@ class LiveListenActivity : AppCompatActivity() {
                         msg.text = "Se descarcă modelul BirdNET… $pct%  (${done / 1048576} / ${total / 1048576} MB)"
                     }
                 }
+                try { downloadTo("$base/static/birdnet/allowed_ro.txt", allowedFile) { _, _ -> } } catch (_: Exception) {}
                 if (!modelReady()) throw IllegalStateException("descărcare incompletă")
                 runOnUiThread {
                     try { dlg.dismiss() } catch (_: Exception) {}
