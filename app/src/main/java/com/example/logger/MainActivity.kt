@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnTrackMap: Button
     private lateinit var btnTransect: Button
     private lateinit var btnFixedSensor: Button
+    private lateinit var btnLiveListen: Button
     private lateinit var startButtonsRow: View
     private lateinit var btnAuth: Button
     private lateinit var btnCompass: Button
@@ -61,6 +62,7 @@ class MainActivity : AppCompatActivity() {
         btnTrackMap      = findViewById(R.id.btnTrackMap)
         btnTransect      = findViewById(R.id.btnTransect)
         btnFixedSensor   = findViewById(R.id.btnFixedSensor)
+        btnLiveListen    = findViewById(R.id.btnLiveListen)
         startButtonsRow  = findViewById(R.id.startButtonsRow)
         btnAuth          = findViewById(R.id.btnAuth)
         btnCompass       = findViewById(R.id.btnCompass)
@@ -96,6 +98,9 @@ class MainActivity : AppCompatActivity() {
         // Cele doua moduri de pornire
         btnTransect.setOnClickListener { beginSession(fixed = false) }
         btnFixedSensor.setOnClickListener { beginSession(fixed = true) }
+
+        // Identificare pasari live, pe telefon (tip Merlin) — ecran separat
+        btnLiveListen.setOnClickListener { startActivity(Intent(this, LiveListenActivity::class.java)) }
 
         btnAuth.setOnClickListener { showAuthMenu() }
         btnCompass.setOnClickListener {

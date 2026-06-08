@@ -80,6 +80,11 @@
             android:exported="false"
             android:label="Înregistrări"/>
 
+        <activity
+            android:name=".LiveListenActivity"
+            android:exported="false"
+            android:label="Ascultă live"/>
+
         <service
             android:name=".RecordingService"
             android:foregroundServiceType="microphone|location"
