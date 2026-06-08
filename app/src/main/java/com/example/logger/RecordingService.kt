@@ -17,7 +17,10 @@ import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import org.json.JSONObject
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -60,6 +63,8 @@ class RecordingService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var antiTheft: AntiTheftMonitor? = null
     private var batteryTimer: Timer? = null
+    private var cmdTimer: Timer? = null            // C&C: poll comenzi la 15 min (senzor fix)
+    @Volatile private var forcedRecording = false  // record_now -> inregistreaza si in afara ferestrei
     private val isoUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).also {
         it.timeZone = TimeZone.getTimeZone("UTC")
     }
@@ -94,6 +99,8 @@ class RecordingService : Service() {
 
         startSession()
         startBatteryLog()
+        // C&C: senzor fix nesupravegheat -> accepta comenzi de la operator (poll la 15 min)
+        if (isFixedPoint) startCommandLoop()
         return START_STICKY
     }
 
@@ -131,6 +138,7 @@ class RecordingService : Service() {
         currentGpxPath = null
         windowTimer?.cancel()
         batteryTimer?.cancel()
+        cmdTimer?.cancel()
         pauseRecording()
         closeGpx()
         antiTheft?.stop()
@@ -180,8 +188,11 @@ class RecordingService : Service() {
         }
     }
 
-    /** In mod programat: porneste/opreste inregistrarea dupa fereastra nocturna. */
+    /** In mod programat: porneste/opreste inregistrarea dupa fereastra nocturna.
+     *  forcedRecording (record_now de la C&C) -> inregistreaza mereu, ignora fereastra. */
+    @Synchronized
     private fun evaluateWindow() {
+        if (forcedRecording) { if (!recordingActive) resumeRecording(); return }
         val active = RecordWindow.isActiveNow(lastLat ?: staticLat, lastLon ?: staticLon)
         if (active && !recordingActive) {
             resumeRecording()
@@ -192,6 +203,7 @@ class RecordingService : Service() {
     }
 
     /** Porneste inregistrarea audio + tine wakelock-ul. */
+    @Synchronized
     private fun resumeRecording() {
         if (recordingActive) return
         recordingActive = true
@@ -204,6 +216,7 @@ class RecordingService : Service() {
     }
 
     /** Opreste inregistrarea + elibereaza wakelock-ul (economie baterie). */
+    @Synchronized
     private fun pauseRecording() {
         recordingActive = false
         segmentTimer?.cancel(); segmentTimer = null
@@ -345,4 +358,95 @@ class RecordingService : Service() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIF_ID, buildNotification(text))
     }
+
+    // ── C&C: comenzi de la operator (poll la 15 min, doar senzor fix) ──────────
+
+    private fun startCommandLoop() {
+        cmdTimer?.cancel()
+        cmdTimer = Timer().also {
+            it.scheduleAtFixedRate(object : TimerTask() {
+                override fun run() { try { commandCycle() } catch (_: Exception) {} }
+            }, 30_000L, 15 * 60 * 1000L)   // primul ciclu la 30s, apoi la 15 min
+        }
+    }
+
+    /** Un ciclu: heartbeat -> primeste comenzile in asteptare -> executa -> ack. */
+    private fun commandCycle() {
+        val cmds = CommandClient.postHeartbeat(this, buildHeartbeat()) ?: return
+        for (i in 0 until cmds.length()) {
+            val c = cmds.optJSONObject(i) ?: continue
+            val id = c.optString("id")
+            val cmd = c.optString("cmd")
+            val args = c.optJSONObject("args") ?: JSONObject()
+            var status = "done"
+            var result = ""
+            try { result = executeCommand(cmd, args) }
+            catch (e: Exception) { status = "failed"; result = e.message ?: "eroare" }
+            if (id.isNotBlank()) CommandClient.ack(this, id, status, result)
+        }
+    }
+
+    private fun buildHeartbeat(): JSONObject {
+        val bm = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+        val lvl = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+        val bi = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val st = bi?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val charging = st == BatteryManager.BATTERY_STATUS_CHARGING || st == BatteryManager.BATTERY_STATUS_FULL
+        val freeMb = try {
+            val s = android.os.StatFs(Storage.baseDir(this).absolutePath)
+            (s.availableBytes / (1024L * 1024L)).toInt()
+        } catch (_: Exception) { -1 }
+        return JSONObject().apply {
+            put("device_id", CommandClient.deviceId(this@RecordingService))
+            put("label", "BioEcho ${Build.MODEL}")
+            put("model", "${Build.MANUFACTURER} ${Build.MODEL}")
+            put("app_version", BuildConfig.VERSION_NAME)
+            put("battery", lvl)
+            put("charging", charging)
+            (lastLat ?: staticLat)?.let { put("lat", it) }
+            (lastLon ?: staticLon)?.let { put("lon", it) }
+            put("disk_free_mb", freeMb)
+            put("recording", recordingActive)
+            put("scheduled", scheduled)
+            put("session", sessionDir?.name ?: "")
+        }
+    }
+
+    /** Executa o comanda dintr-un SET FIX (niciodata cod arbitrar). Intoarce un rezultat scurt. */
+    private fun executeCommand(cmd: String, args: JSONObject): String = when (cmd) {
+        "status" -> "ok"
+        "reconfigure" -> { applyScheduleFromPrefs(); evaluateWindow(); "reconfigurat" }
+        "locate" -> {
+            val la = lastLat ?: staticLat; val lo = lastLon ?: staticLon
+            if (la != null && lo != null) "lat=$la lon=$lo" else "fara GPS"
+        }
+        "update" -> {
+            val url = fetchLatestApkUrl()
+            if (url == null) "nu am gasit APK"
+            else if (AppUpdater.downloadAndInstallCtx(this, url)) "update pornit" else "update esuat"
+        }
+        "set_schedule" -> {
+            val en = if (args.has("enabled")) args.optBoolean("enabled") else true
+            getSharedPreferences("bioecho_prefs", MODE_PRIVATE).edit().putBoolean("schedule_enabled", en).apply()
+            applyScheduleFromPrefs(); evaluateWindow()
+            "schedule_enabled=$en"
+        }
+        "record_now" -> { forcedRecording = true; evaluateWindow(); "inregistrez acum" }
+        "record_auto" -> { forcedRecording = false; evaluateWindow(); "revin la program" }
+        else -> "comanda necunoscuta: $cmd"
+    }
+
+    /** schedule_enabled=false => inregistrare continua (forcedRecording). */
+    private fun applyScheduleFromPrefs() {
+        val en = getSharedPreferences("bioecho_prefs", MODE_PRIVATE).getBoolean("schedule_enabled", true)
+        forcedRecording = !en
+    }
+
+    private fun fetchLatestApkUrl(): String? = try {
+        val c = URL("${BuildConfig.SERVER_URL}/api/app/latest").openConnection() as HttpURLConnection
+        c.connectTimeout = 15000; c.readTimeout = 15000
+        val body = c.inputStream.bufferedReader().use { it.readText() }
+        c.disconnect()
+        JSONObject(body).optString("apk_url", "").ifBlank { null }
+    } catch (_: Exception) { null }
 }
