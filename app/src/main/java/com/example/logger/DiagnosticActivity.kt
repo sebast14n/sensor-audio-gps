@@ -86,6 +86,26 @@ class DiagnosticActivity : AppCompatActivity() {
         battText = small("…"); root.addView(battText)
         root.addView(Button(this).apply { text = "Reîmprospătează"; setOnClickListener { readBattery() } })
 
+        // ── Format înregistrare (WAV implicit / FLAC experimental) ──
+        root.addView(h2("💾 Format înregistrare"))
+        root.addView(hint("Ambele lossless. FLAC ≈ ½ din WAV, dar e experimental: înregistrează un test, " +
+            "verifică în „🗂 Înregistrări” că se aude + se urcă; dacă e bun, îl facem implicit."))
+        val prefs = getSharedPreferences("bioecho_prefs", Context.MODE_PRIVATE)
+        val fmtText = small("")
+        fun refreshFmt() {
+            fmtText.text = if (prefs.getString("audio_format", "wav") == "flac")
+                "Acum: FLAC (experimental)" else "Acum: WAV (implicit, identic Song Meter)"
+        }
+        refreshFmt(); root.addView(fmtText)
+        root.addView(Button(this).apply {
+            text = "Comută WAV ⇄ FLAC"
+            setOnClickListener {
+                val cur = prefs.getString("audio_format", "wav")
+                prefs.edit().putString("audio_format", if (cur == "flac") "wav" else "flac").apply()
+                refreshFmt()
+            }
+        })
+
         root.addView(Button(this).apply { text = "← Înapoi"; setOnClickListener { finish() } })
 
         setContentView(scroll)

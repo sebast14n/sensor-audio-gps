@@ -32,7 +32,7 @@ class RecordingService : Service() {
         private const val WINDOW_CHECK_MS = 60_000L   // verificare fereastra orara la 60s
     }
 
-    private var recorder: MediaRecorder? = null
+    private var segRec: AudioSegmentRecorder? = null
     private var locationManager: LocationManager? = null
     private var locationListener: LocationListener? = null
     private var gpxFile: File? = null
@@ -214,48 +214,19 @@ class RecordingService : Service() {
     private fun startAudioSegment() {
         val ts = sdf.format(Date())
         segmentIndex++
-        val file = File(sessionDir, "audio_${"%03d".format(segmentIndex)}_$ts.m4a")
-
-        recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-            MediaRecorder(this)
-        else
-            @Suppress("DEPRECATION") MediaRecorder()
-
-        recorder?.apply {
-            // UNPROCESSED = sunet brut fara AGC/noise-suppression Android (ideal pt. bioacustica)
-            // Fallback la MIC daca dispozitivul nu suporta UNPROCESSED
-            val audioSource = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                MediaRecorder.AudioSource.UNPROCESSED
-            } else {
-                MediaRecorder.AudioSource.MIC
-            }
-            setAudioSource(audioSource)
-            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            setAudioSamplingRate(48000)   // rata nativa BirdNET
-            setAudioEncodingBitRate(256000)
-            setAudioChannels(1)           // mono explicit
-            setOutputFile(file.absolutePath)
-            try {
-                prepare(); start()
-                logAudioDevice()
-            } catch (e: Exception) {
-                // UNPROCESSED nesustinut — reincearca cu MIC
-                if (audioSource == MediaRecorder.AudioSource.UNPROCESSED) {
-                    reset()
-                    setAudioSource(MediaRecorder.AudioSource.MIC)
-                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                    setAudioSamplingRate(48000)
-                    setAudioEncodingBitRate(256000)
-                    setAudioChannels(1)
-                    setOutputFile(file.absolutePath)
-                    try { prepare(); start() } catch (e2: Exception) { e2.printStackTrace() }
-                } else {
-                    e.printStackTrace()
-                }
-            }
+        // baza fara extensie; recorderul alege .flac sau .wav
+        val base = File(sessionDir, "audio_${"%03d".format(segmentIndex)}_$ts")
+        // LOSSLESS: WAV implicit (fiabil, = Song Meter); FLAC experimental daca userul a ales
+        val useFlac = getSharedPreferences("bioecho_prefs", MODE_PRIVATE).getString("audio_format", "wav") == "flac"
+        var rec = AudioSegmentRecorder(48000, 1, preferFlac = useFlac)
+        val f = try { rec.start(base) } catch (e: Exception) { null }
+        if (f == null && useFlac) {
+            // esec FLAC -> reincearca WAV (nu pierdem segmentul)
+            rec = AudioSegmentRecorder(48000, 1, preferFlac = false)
+            try { rec.start(base) } catch (_: Exception) {}
         }
+        segRec = rec
+        logAudioDevice()
     }
 
     private fun logAudioDevice() {
@@ -275,9 +246,8 @@ class RecordingService : Service() {
     }
 
     private fun stopAudio() {
-        try { recorder?.stop() } catch (_: Exception) {}
-        try { recorder?.release() } catch (_: Exception) {}
-        recorder = null
+        try { segRec?.stop() } catch (_: Exception) {}
+        segRec = null
     }
 
     private fun startGps() {

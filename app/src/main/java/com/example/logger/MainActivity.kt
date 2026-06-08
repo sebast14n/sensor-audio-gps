@@ -281,7 +281,7 @@ class MainActivity : AppCompatActivity() {
         val labels = sessions.map { dir ->
             val ts = dir.name.removePrefix("session_")
             val pretty = formatTimestamp(ts)
-            val files = dir.listFiles()?.filter { it.name.endsWith(".m4a") || it.name.endsWith(".wav") } ?: emptyList()
+            val files = dir.listFiles()?.filter { it.name.endsWith(".m4a") || it.name.endsWith(".wav") || it.name.endsWith(".flac") } ?: emptyList()
             val totalMb = files.sumOf { it.length() } / 1024.0 / 1024.0
             "$pretty\n${files.size} fișiere · %.1f MB".format(totalMb)
         }.toTypedArray()
@@ -339,7 +339,7 @@ class MainActivity : AppCompatActivity() {
         }
         val total = sessions.sumOf { Storage.dirSize(it) }
         val labels = sessions.map { dir ->
-            val n = dir.listFiles()?.count { it.name.endsWith(".m4a") || it.name.endsWith(".wav") } ?: 0
+            val n = dir.listFiles()?.count { it.name.endsWith(".m4a") || it.name.endsWith(".wav") || it.name.endsWith(".flac") } ?: 0
             "${formatTimestamp(dir.name.removePrefix("session_"))}\n$n fișiere · ${Storage.humanSize(Storage.dirSize(dir))}"
         }.toTypedArray()
         AlertDialog.Builder(this)
@@ -394,7 +394,7 @@ class MainActivity : AppCompatActivity() {
     /** Reda primul fisier audio din sesiune (verificare rapida ca s-a captat). */
     private fun playSession(dir: File) {
         val audio = dir.listFiles()
-            ?.filter { it.name.endsWith(".m4a") || it.name.endsWith(".wav") }
+            ?.filter { it.name.endsWith(".m4a") || it.name.endsWith(".wav") || it.name.endsWith(".flac") }
             ?.sortedBy { it.name }?.firstOrNull()
         if (audio == null) { Toast.makeText(this, "Nicio înregistrare audio în sesiune", Toast.LENGTH_SHORT).show(); return }
         try {

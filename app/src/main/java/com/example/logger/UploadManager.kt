@@ -63,7 +63,7 @@ class UploadManager(private val context: Context) {
         if (gpxFile == null) { callback.onError("Fișier GPX lipsă în ${sessionDir.name}"); return }
 
         val audioFiles = (sessionDir.listFiles() ?: emptyArray())
-            .filter { it.name.endsWith(".m4a") || it.name.endsWith(".wav") }
+            .filter { it.name.endsWith(".m4a") || it.name.endsWith(".wav") || it.name.endsWith(".flac") }
             .sortedBy { it.name }
         if (audioFiles.isEmpty()) { callback.onError("Nicio înregistrare audio în ${sessionDir.name}"); return }
 
@@ -136,7 +136,11 @@ class UploadManager(private val context: Context) {
         for (attempt in 0 until MAX_RETRIES) {
             try {
                 val boundary = "BioEcho${System.currentTimeMillis()}"
-                val mime = if (file.name.endsWith(".wav")) "audio/wav" else "audio/mp4"
+                val mime = when {
+                    file.name.endsWith(".wav") -> "audio/wav"
+                    file.name.endsWith(".flac") -> "audio/flac"
+                    else -> "audio/mp4"
+                }
                 // timeout generos: fisiere mari pe uplink lent (a fost cauza esecului lui 003)
                 val conn = openConn("$SERVER/api/recordings/upload", token, boundary, 60_000, 600_000)
                 DataOutputStream(conn.outputStream).use { out ->

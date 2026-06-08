@@ -104,7 +104,7 @@ class RecordingsActivity : AppCompatActivity() {
                     isChecked = selected.contains(dir.name)
                     setOnClickListener { toggleSel(dir.name) }
                 }
-                val nFiles = dir.listFiles()?.count { it.name.endsWith(".m4a") || it.name.endsWith(".wav") } ?: 0
+                val nFiles = dir.listFiles()?.count { it.name.endsWith(".m4a") || it.name.endsWith(".wav") || it.name.endsWith(".flac") } ?: 0
                 val state = UploadManager.sessionState(dir)
                 val badge = when (state) { "done" -> "  ✓ urcat"; "partial" -> "  ⚠ parțial"; else -> "" }
                 val color = when (state) { "done" -> 0xFF66BB6A.toInt(); "partial" -> 0xFFFFB74D.toInt(); else -> 0xFFE0E0E0.toInt() }
@@ -221,7 +221,7 @@ class RecordingsActivity : AppCompatActivity() {
     }
 
     private fun play(dir: File) {
-        val audio = dir.listFiles()?.filter { it.name.endsWith(".m4a") || it.name.endsWith(".wav") }
+        val audio = dir.listFiles()?.filter { it.name.endsWith(".m4a") || it.name.endsWith(".wav") || it.name.endsWith(".flac") }
             ?.sortedBy { it.name }?.firstOrNull() ?: run { toast("Niciun audio"); return }
         try {
             mediaPlayer?.release()

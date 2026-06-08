@@ -56,7 +56,20 @@ Regresie față de v1.5.3 (atunci tap-ul deschidea direct meniul Ascultă/Upload
 
 ---
 
-## 6. 🟠 Format înregistrări ≠ Wildlife Acoustics (VERIFICAT)
+## 6. 🟡 Format înregistrări — motor LOSSLESS livrat în 1.9.2 (FLAC experimental)
+
+**LIVRAT 1.9.2:** captura rescrisă de pe `MediaRecorder`/AAC pe **`AudioRecord` (PCM 16-bit, UNPROCESSED)**
+→ `AudioSegmentRecorder.kt`. **WAV = implicit** (lossless, 100% fiabil, **identic Song Meter**). **FLAC =
+experimental** (encoder `MediaCodec` + header din CSD), selectabil din ecranul 🔧 Diagnostic („Comută WAV ⇄
+FLAC"), cu **fallback automat pe WAV** dacă encoderul FLAC nu pornește. App + server acceptă `.flac`
+(filtre extensii + BirdNET citește după conținut). **De testat pe teren:** înregistrează în FLAC, verifică
+că fișierele se aud + se urcă; dacă-s valide → fac FLAC implicit în 1.9.3 (o linie). **Follow-up server:**
+parsare durată/sample-rate din STREAMINFO FLAC la upload (acum sr/dur lipsesc pt FLAC — nu blochează BirdNET).
+Detalii istorice (de ce ≠ Song Meter inițial) mai jos.
+
+---
+
+### (istoric) Format înregistrări ≠ Wildlife Acoustics — constatarea inițială
 
 **Verificare cerută de user — rezultat: NU coincid.**
 - **App-ul nostru** (`RecordingService.kt:197-201`): `MPEG_4 / AAC`, mono, **48 kHz, 256 kbps → fișier `.m4a` (cu pierderi)**. Nume: `audio_{NNN}_{yyyyMMdd_HHmmss}.m4a` în `session_{ts}/`.
