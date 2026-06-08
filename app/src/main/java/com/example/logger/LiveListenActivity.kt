@@ -111,7 +111,7 @@ class LiveListenActivity : AppCompatActivity() {
         })
 
         setContentView(root)
-        showHint("Apasă „Ascultă live" pentru a începe.")
+        showHint("Apasă butonul de sus ca să începi.")
     }
 
     override fun onPause() {
