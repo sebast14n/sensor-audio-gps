@@ -28,12 +28,16 @@ object CommandClient {
         return id
     }
 
-    private fun jwt(ctx: Context): String? =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("jwt_token", null)
+    /** Token de auth: identitatea de SENZOR (device_token, fara Google) daca a fost provizionat,
+     *  altfel JWT-ul contului (legacy). */
+    private fun authToken(ctx: Context): String? {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return p.getString("device_token", null) ?: p.getString("jwt_token", null)
+    }
 
     /** POST heartbeat -> comenzile in asteptare (JSONArray), sau null daca nu e net/autentificat. */
     fun postHeartbeat(ctx: Context, payload: JSONObject): JSONArray? {
-        val token = jwt(ctx) ?: return null
+        val token = authToken(ctx) ?: return null
         return try {
             val c = URL("${BuildConfig.SERVER_URL}/api/device/heartbeat").openConnection() as HttpURLConnection
             c.requestMethod = "POST"
@@ -50,7 +54,7 @@ object CommandClient {
 
     /** Confirma executia unei comenzi. */
     fun ack(ctx: Context, id: String, status: String, result: String) {
-        val token = jwt(ctx) ?: return
+        val token = authToken(ctx) ?: return
         try {
             val c = URL("${BuildConfig.SERVER_URL}/api/device/commands/$id/ack").openConnection() as HttpURLConnection
             c.requestMethod = "POST"

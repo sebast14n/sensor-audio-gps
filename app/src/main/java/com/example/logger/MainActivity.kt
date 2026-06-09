@@ -226,11 +226,13 @@ class MainActivity : AppCompatActivity() {
         } else {
             AlertDialog.Builder(this)
                 .setTitle("Autentificare")
-                .setItems(arrayOf("🅖  Cu Google", "📷  Cu cod QR", "🔑  Cu token (avansat)")) { _, which ->
+                .setItems(arrayOf("🅖  Cu Google", "📷  Cu cod QR", "🔑  Cu token (avansat)",
+                                  "📟  Provizionează ca senzor (scan QR)")) { _, which ->
                     when (which) {
                         0 -> doGoogleLogin()
                         1 -> startActivityForResult(Intent(this, QrScanActivity::class.java), 300)
                         2 -> showTokenDialog()
+                        3 -> startActivity(Intent(this, QrScanActivity::class.java))  // QR senzor -> device_token
                     }
                 }
                 .setNegativeButton("Anulează", null)

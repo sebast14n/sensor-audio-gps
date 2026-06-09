@@ -366,7 +366,7 @@ class RecordingService : Service() {
         cmdTimer = Timer().also {
             it.scheduleAtFixedRate(object : TimerTask() {
                 override fun run() { try { commandCycle() } catch (_: Exception) {} }
-            }, 30_000L, 15 * 60 * 1000L)   // primul ciclu la 30s, apoi la 15 min
+            }, 30_000L, 3 * 60 * 1000L)   // primul ciclu la 30s, apoi la 3 min
         }
     }
 

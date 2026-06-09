@@ -95,6 +95,21 @@ class QrScanActivity : AppCompatActivity() {
                 runOnUiThread { tvHint.text = "Se verifică codul..." }
                 Thread { verifyCode(authCode) }.start()
             }
+            code.startsWith("bioecho://device/") -> {
+                // Provizionare senzor: tokenul "nzdev_..." e identitatea locala (fara Google)
+                scanned = true
+                val token = code.removePrefix("bioecho://device/").trim()
+                if (token.startsWith("nzdev_") && token.length > 12) {
+                    getSharedPreferences("bioecho_prefs", MODE_PRIVATE).edit()
+                        .putString("device_token", token).apply()
+                    runOnUiThread {
+                        Toast.makeText(this, "✓ Telefon provizionat ca senzor.", Toast.LENGTH_LONG).show()
+                        setResult(RESULT_OK); finish()
+                    }
+                } else {
+                    runOnUiThread { tvHint.text = "QR senzor invalid."; scanned = false }
+                }
+            }
             else -> return
         }
     }
