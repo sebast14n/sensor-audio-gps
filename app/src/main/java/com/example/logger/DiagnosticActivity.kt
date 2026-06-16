@@ -28,6 +28,10 @@ import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import kotlin.math.log10
 import kotlin.math.sqrt
 
@@ -85,6 +89,12 @@ class DiagnosticActivity : AppCompatActivity() {
         root.addView(h2("🔋 Baterie"))
         battText = small("…"); root.addView(battText)
         root.addView(Button(this).apply { text = "Reîmprospătează"; setOnClickListener { readBattery() } })
+        val autonomyText = small("")
+        root.addView(Button(this).apply {
+            text = "📊 Analizează consum & autonomie"
+            setOnClickListener { autonomyText.text = analyzeAutonomy() }
+        })
+        root.addView(autonomyText)
 
         // ── Format înregistrare: WAV-only (FLAC scos — encoderul on-device producea fisiere goale ~301B) ──
         root.addView(h2("💾 Format înregistrare"))
@@ -243,6 +253,66 @@ class DiagnosticActivity : AppCompatActivity() {
             if (temp > 0) append("Temperatură: ${temp / 10.0} °C\n")
             append("Curent acum: ~$mA mA" + (if (mA < 0) " (descărcare)" else if (mA > 0) " (încărcare)" else "") + "\n")
             append("La priză: " + (if (charging) "da" else "nu"))
+        }
+    }
+
+    /** Citeste /BioEcho/battery_log.csv si estimeaza consumul (mAh/h record vs pauza) + autonomia.
+     *  Foloseste delta charge_counter (µAh) intre probe consecutive in descarcare (charging=0). */
+    private fun analyzeAutonomy(): String {
+        val f = File(Storage.baseDir(this), "battery_log.csv")
+        if (!f.exists()) return "Niciun log încă. Lasă telefonul să înregistreze câteva ore, apoi revino."
+        val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).also { it.timeZone = TimeZone.getTimeZone("UTC") }
+        data class Row(val t: Long, val charge: Int, val cur: Int, val lvl: Int, val charging: Int, val rec: Int)
+        val rows = ArrayList<Row>()
+        try {
+            f.readLines().drop(1).forEach { ln ->
+                val c = ln.split(",")
+                if (c.size >= 8) {
+                    val t = try { fmt.parse(c[0])?.time ?: return@forEach } catch (_: Exception) { return@forEach }
+                    val charge = c[1].toIntOrNull() ?: return@forEach
+                    rows.add(Row(t, charge, c[2].toIntOrNull() ?: 0, c[3].toIntOrNull() ?: -1,
+                                 c[6].toIntOrNull() ?: 0, c[7].toIntOrNull() ?: 0))
+                }
+            }
+        } catch (e: Exception) { return "Eroare la citirea logului: ${e.message?.take(60)}" }
+        if (rows.size < 2) return "Prea puține probe (${rows.size}). Mai lasă-l să ruleze câteva ore."
+
+        var recMah = 0.0; var recH = 0.0; var pauseMah = 0.0; var pauseH = 0.0
+        var totMah = 0.0; var totH = 0.0; var capSum = 0.0; var capN = 0
+        for (i in 1 until rows.size) {
+            val a = rows[i - 1]; val b = rows[i]
+            if (b.lvl in 1..100 && b.charge > 0) { capSum += (b.charge / 1000.0) / (b.lvl / 100.0); capN++ }
+            if (a.charging == 1 || b.charging == 1) continue            // ignora intervalele cu incarcare
+            val dtH = (b.t - a.t) / 3_600_000.0
+            if (dtH <= 0.0 || dtH > 1.0) continue                       // doar intervale 0..60 min
+            val dMah = (a.charge - b.charge) / 1000.0                   // consumat (pozitiv = descarcare)
+            if (dMah <= 0.0) continue
+            totMah += dMah; totH += dtH
+            if (b.rec == 1) { recMah += dMah; recH += dtH } else { pauseMah += dMah; pauseH += dtH }
+        }
+        if (totH <= 0.0) return "Probe doar la încărcare/insuficiente. Lasă-l câteva ore în descărcare, în mod înregistrare."
+
+        val last = rows.last()
+        val curMah = last.charge / 1000.0
+        val fullMah = if (capN > 0) capSum / capN else curMah / (if (last.lvl in 1..100) last.lvl / 100.0 else 1.0)
+        val overall = totMah / totH
+        val recRate = if (recH > 0) recMah / recH else 0.0
+        val pauseRate = if (pauseH > 0) pauseMah / pauseH else 0.0
+        val instMa = -last.cur / 1000.0                                 // CURRENT_NOW: − = descarcare
+        fun days(rate: Double) = if (rate > 0) curMah / rate / 24.0 else 0.0
+
+        return buildString {
+            append("Probe: ${rows.size} pe ${"%.1f".format(totH)} h în descărcare\n")
+            append("Capacitate estimată: ~${"%.0f".format(fullMah)} mAh\n")
+            append("Acum: ${last.lvl}% (~${"%.0f".format(curMah)} mAh)")
+            if (instMa > 0.1) append(" · draw instant ~${"%.0f".format(instMa)} mA")
+            append("\n— consum mediu —\n")
+            append("• Înregistrare: ${if (recH > 0) "%.0f mAh/h".format(recRate) else "—"}\n")
+            append("• Pauză: ${if (pauseH > 0) "%.0f mAh/h".format(pauseRate) else "—"}\n")
+            append("• Global (mixul observat): ${"%.0f".format(overall)} mAh/h\n")
+            append("— autonomie de la nivelul actual —\n")
+            if (recRate > 0) append("• Înregistrare continuă: ~${"%.1f".format(days(recRate))} zile\n")
+            append("• La programul/mixul actual: ~${"%.1f".format(days(overall))} zile")
         }
     }
 
