@@ -229,15 +229,9 @@ class RecordingService : Service() {
         segmentIndex++
         // baza fara extensie; recorderul alege .flac sau .wav
         val base = File(sessionDir, "audio_${"%03d".format(segmentIndex)}_$ts")
-        // LOSSLESS: WAV implicit (fiabil, = Song Meter); FLAC experimental daca userul a ales
-        val useFlac = getSharedPreferences("bioecho_prefs", MODE_PRIVATE).getString("audio_format", "wav") == "flac"
-        var rec = AudioSegmentRecorder(48000, 1, preferFlac = useFlac)
-        val f = try { rec.start(base) } catch (e: Exception) { null }
-        if (f == null && useFlac) {
-            // esec FLAC -> reincearca WAV (nu pierdem segmentul)
-            rec = AudioSegmentRecorder(48000, 1, preferFlac = false)
-            try { rec.start(base) } catch (_: Exception) {}
-        }
+        // LOSSLESS: WAV (fiabil, = Song Meter). FLAC dezactivat — encoderul on-device producea fisiere goale (~301B).
+        val rec = AudioSegmentRecorder(48000, 1, preferFlac = false)
+        try { rec.start(base) } catch (_: Exception) {}
         segRec = rec
         logAudioDevice()
     }

@@ -86,25 +86,13 @@ class DiagnosticActivity : AppCompatActivity() {
         battText = small("…"); root.addView(battText)
         root.addView(Button(this).apply { text = "Reîmprospătează"; setOnClickListener { readBattery() } })
 
-        // ── Format înregistrare (WAV implicit / FLAC experimental) ──
+        // ── Format înregistrare: WAV-only (FLAC scos — encoderul on-device producea fisiere goale ~301B) ──
         root.addView(h2("💾 Format înregistrare"))
-        root.addView(hint("Ambele lossless. FLAC ≈ ½ din WAV, dar e experimental: înregistrează un test, " +
-            "verifică în „🗂 Înregistrări” că se aude + se urcă; dacă e bun, îl facem implicit."))
+        root.addView(hint("WAV lossless, identic cu Song Meter — formatul standard pentru analiza acustică."))
+        // defensiv: reseteaza orice preferinta veche "flac" ramasa pe telefon
         val prefs = getSharedPreferences("bioecho_prefs", Context.MODE_PRIVATE)
-        val fmtText = small("")
-        fun refreshFmt() {
-            fmtText.text = if (prefs.getString("audio_format", "wav") == "flac")
-                "Acum: FLAC (experimental)" else "Acum: WAV (implicit, identic Song Meter)"
-        }
-        refreshFmt(); root.addView(fmtText)
-        root.addView(Button(this).apply {
-            text = "Comută WAV ⇄ FLAC"
-            setOnClickListener {
-                val cur = prefs.getString("audio_format", "wav")
-                prefs.edit().putString("audio_format", if (cur == "flac") "wav" else "flac").apply()
-                refreshFmt()
-            }
-        })
+        if (prefs.getString("audio_format", "wav") != "wav") prefs.edit().putString("audio_format", "wav").apply()
+        root.addView(small("Acum: WAV (lossless, identic Song Meter)"))
 
         root.addView(Button(this).apply { text = "← Înapoi"; setOnClickListener { finish() } })
 
