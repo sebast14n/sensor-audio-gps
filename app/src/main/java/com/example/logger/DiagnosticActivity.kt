@@ -104,6 +104,14 @@ class DiagnosticActivity : AppCompatActivity() {
         if (prefs.getString("audio_format", "wav") != "wav") prefs.edit().putString("audio_format", "wav").apply()
         root.addView(small("Acum: WAV (lossless, identic Song Meter)"))
 
+        // ── Program de înregistrare (senzor fix) ──
+        root.addView(h2("⏰ Program de înregistrare"))
+        root.addView(hint("Pentru senzor fix: ferestre multiple (zori/apus/noapte) + duty-cycle pentru autonomie. Gol = noapte întreagă (implicit)."))
+        root.addView(Button(this).apply {
+            text = "Editează programul"
+            setOnClickListener { startActivity(Intent(this@DiagnosticActivity, ScheduleEditorActivity::class.java)) }
+        })
+
         root.addView(Button(this).apply { text = "← Înapoi"; setOnClickListener { finish() } })
 
         setContentView(scroll)

@@ -71,6 +71,11 @@
             android:label="Diagnostic"/>
 
         <activity
+            android:name=".ScheduleEditorActivity"
+            android:exported="false"
+            android:label="Program de înregistrare"/>
+
+        <activity
             android:name=".PlaybackActivity"
             android:exported="false"
             android:label="Redare"/>

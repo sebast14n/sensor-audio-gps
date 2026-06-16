@@ -11,8 +11,8 @@ android {
         applicationId "com.example.logger"
         minSdk 26
         targetSdk 35
-        versionCode 34
-        versionName "1.14.0"
+        versionCode 35
+        versionName "1.15.0"
 
         // Server backend — de la 1.7.0 platforma e No Zero (noze.ro), nu echo.noze.ro.
         buildConfigField "String", "SERVER_URL", "\"https://noze.ro\""

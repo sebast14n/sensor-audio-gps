@@ -193,7 +193,10 @@ class RecordingService : Service() {
     @Synchronized
     private fun evaluateWindow() {
         if (forcedRecording) { if (!recordingActive) resumeRecording(); return }
-        val active = RecordWindow.isActiveNow(lastLat ?: staticLat, lastLon ?: staticLon)
+        val lat = lastLat ?: staticLat; val lon = lastLon ?: staticLon
+        // program personalizat daca userul a setat unul; altfel fereastra nocturna implicita (zero regresie)
+        val active = Schedule.recordingNowOrNull(this, Calendar.getInstance(), lat, lon)
+            ?: RecordWindow.isActiveNow(lat, lon)
         if (active && !recordingActive) {
             resumeRecording()
         } else if (!active && recordingActive) {
