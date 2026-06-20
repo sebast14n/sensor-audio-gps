@@ -32,8 +32,9 @@ class ScheduleEditorActivity : AppCompatActivity() {
     private fun rebuild() {
         root.removeAllViews()
         root.addView(h1("⏰ Program de înregistrare"))
-        root.addView(hint("Senzor fix: când să înregistreze. Gol = programul IMPLICIT (noapte: apus−30 → răsărit+30). " +
-            "Ferestrele sunt relative la apus/răsărit (se recalculează zilnic) + duty-cycle pentru autonomie."))
+        root.addView(hint("Senzor fix: când să înregistreze. Gol = IMPLICIT (noapte: apus−30 → răsărit+30). " +
+            "Pentru ZIUA: presetul „☀ Zi\" (un tap) sau o fereastră cu „Oră fixă\". Ferestrele relative la " +
+            "apus/răsărit se recalculează zilnic; + duty-cycle pentru autonomie."))
 
         // status orientativ (fara GPS: apus≈19:00, rasarit≈07:00)
         val now = Schedule.recordingNowOrNull(this, Calendar.getInstance(), null, null)
@@ -62,6 +63,7 @@ class ScheduleEditorActivity : AppCompatActivity() {
         presetBtn("🦇 Noapte întreagă (apus−30 → răsărit+30)", "noapte")
         presetBtn("🌅 Cor de zori + seară", "zori_seara")
         presetBtn("🔋 Noapte cu economie (5 rec / 30 pauză)", "noapte_eco")
+        presetBtn("☀ Zi (răsărit → apus)", "zi")
         presetBtn("⏱ Non-stop (24h)", "nonstop")
 
         root.addView(h2(" "))
@@ -85,8 +87,8 @@ class ScheduleEditorActivity : AppCompatActivity() {
     }
 
     private fun addWindowDialog() {
-        val refs = arrayOf("Apus", "Răsărit")
-        val refKeys = arrayOf("sunset", "sunrise")
+        val refs = arrayOf("Apus", "Răsărit", "Oră fixă")
+        val refKeys = arrayOf("sunset", "sunrise", "abs")
         fun spinner(sel: Int) = Spinner(this).apply {
             adapter = ArrayAdapter(this@ScheduleEditorActivity, android.R.layout.simple_spinner_item, refs)
                 .also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
@@ -103,6 +105,7 @@ class ScheduleEditorActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL; setPadding(48, 16, 48, 0)
             addView(small("Start:")); addView(spStart); addView(offStart)
             addView(small("Final:")); addView(spEnd); addView(offEnd)
+            addView(small("„Oră fixă\": offset = minute după miezul nopții (08:00 = 480, 20:00 = 1200)."))
             addView(small("Duty-cycle (lasă 0/0 = continuu):")); addView(dOn); addView(dOff)
         }
         AlertDialog.Builder(this).setTitle("Adaugă fereastră").setView(box)

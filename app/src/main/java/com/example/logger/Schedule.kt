@@ -114,6 +114,7 @@ object Schedule {
         "zori_seara"  -> listOf(Win("sunrise", -30, "sunrise", 180), Win("sunset", -90, "sunset", 30)) // cor de zori + seara
         "noapte_eco"  -> listOf(Win("sunset", -30, "sunrise", 30, 5, 30))                           // economie: 5 rec / 30 pauza
         "nonstop"     -> listOf(Win("abs", 0, "abs", 0))                                            // 24h continuu
+        "zi"          -> listOf(Win("sunrise", 0, "sunset", 0))                                     // ZI: rasarit -> apus (pasari de zi)
         else          -> emptyList()
     }
 }

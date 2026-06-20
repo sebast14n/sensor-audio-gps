@@ -518,6 +518,11 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        // Cere o SINGURA data (nu la fiecare pornire). Daca userul refuza, nu-l mai nag-uim;
+        // poate reactiva oricand din butonul Diagnostic.
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        if (prefs.getBoolean("batopt_prompted", false)) return
+        prefs.edit().putBoolean("batopt_prompted", true).apply()
 
         AlertDialog.Builder(this)
             .setTitle("Optimizare baterie")
