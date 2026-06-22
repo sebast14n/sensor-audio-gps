@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -22,8 +23,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import java.io.File
+import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * „🎤 Ascultă live" — identificare păsări pe telefon, în timp real, cu BirdNET (ca Merlin Sound ID).
@@ -36,6 +41,7 @@ class LiveListenActivity : AppCompatActivity() {
 
     private lateinit var tvStatus: TextView
     private lateinit var btnToggle: Button
+    private lateinit var btnRec: Button
     private lateinit var currentBox: LinearLayout
     private lateinit var tvSessionHdr: TextView
     private lateinit var sessionBox: LinearLayout
@@ -47,6 +53,13 @@ class LiveListenActivity : AppCompatActivity() {
 
     private class Agg(val sci: String, val common: String, var max: Float, var count: Int)
     private val session = LinkedHashMap<String, Agg>()
+
+    // ── inregistrare in timpul ascultarii (scriem WAV din ACELASI flux PCM) ──
+    private val wavLock = Any()
+    @Volatile private var recording = false
+    private var wavRaf: RandomAccessFile? = null
+    private var wavBytes = 0L
+    private var wavFile: File? = null
 
     private val SR = 48000
     private val WIN = 144000     // 3.0 s
@@ -87,6 +100,16 @@ class LiveListenActivity : AppCompatActivity() {
             setOnClickListener { if (listening) stopListening() else startListening() }
         }
         root.addView(btnToggle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
+
+        btnRec = Button(this).apply {
+            text = "⏺  Înregistrează"; textSize = 15f; setTextColor(Color.WHITE)
+            setBackgroundColor(0xFF455A64.toInt())
+            isEnabled = false   // activ doar cât ascultăm
+            setOnClickListener { if (recording) stopRecording() else startRecording() }
+        }
+        root.addView(btnRec, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)).apply {
+            topMargin = dp(8)
+        })
 
         root.addView(TextView(this).apply {
             text = "Acum aud:"; setTextColor(0xFF90CAF9.toInt()); textSize = 13f
@@ -147,19 +170,25 @@ class LiveListenActivity : AppCompatActivity() {
     }
 
     private fun stopListening() {
+        if (recording) stopRecording()
         listening = false
         try { audioThread?.join(1500) } catch (_: Exception) {}
         audioThread = null
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         btnToggle.text = "🎤  Ascultă live"
         btnToggle.setBackgroundColor(0xFF43A047.toInt())
+        btnRec.isEnabled = false
         tvStatus.text = "⚪ Oprit"
     }
 
     private fun beginAudio() {
         if (listening || isFinishing || isDestroyed) return
         listening = true
+        // ține ecranul aprins cât ascultăm (fără screensaver care oprea sesiunea)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         btnToggle.text = "⏹  Oprește"
         btnToggle.setBackgroundColor(0xFFE53935.toInt())
+        btnRec.isEnabled = true
         tvStatus.text = "🔴 Ascult… (se pregătește modelul)"
         currentBox.removeAllViews()
         audioThread = Thread { audioLoop() }.also { it.start() }
@@ -214,6 +243,7 @@ class LiveListenActivity : AppCompatActivity() {
             while (listening) {
                 val n = rec.read(pcm, 0, pcm.size)
                 if (n <= 0) continue
+                if (recording) writePcmToWav(pcm, n)
                 for (i in 0 until n) {
                     ring[pos] = pcm[i].toFloat() / 32768f
                     pos = (pos + 1) % WIN
@@ -291,6 +321,79 @@ class LiveListenActivity : AppCompatActivity() {
             }
             sessionBox.addView(row)
         }
+    }
+
+    // ── inregistrare WAV in timpul ascultarii ─────────────────────────────────
+
+    private fun startRecording() {
+        if (!listening) { Toast.makeText(this, "Pornește mai întâi ascultarea.", Toast.LENGTH_SHORT).show(); return }
+        try {
+            val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val dir = File(Storage.baseDir(this), "session_live_$ts").apply { mkdirs() }
+            val f = File(dir, "audio_live_$ts.wav")
+            val raf = RandomAccessFile(f, "rw")
+            writeWavHeader(raf, 0)
+            synchronized(wavLock) { wavRaf = raf; wavBytes = 0L; wavFile = f; recording = true }
+            btnRec.text = "⏹  Oprește înregistrarea ●"
+            btnRec.setBackgroundColor(0xFFE53935.toInt())
+            Toast.makeText(this, "Înregistrez audio în ${dir.name}", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Nu pot înregistra: ${e.message?.take(80)}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun stopRecording() {
+        val raf: RandomAccessFile?; val nbytes: Long
+        synchronized(wavLock) { recording = false; raf = wavRaf; nbytes = wavBytes; wavRaf = null }
+        if (raf != null) {
+            try {
+                raf.seek(4);  writeIntLE(raf, (36 + nbytes).toInt())
+                raf.seek(40); writeIntLE(raf, nbytes.toInt())
+                raf.close()
+            } catch (_: Exception) {}
+        }
+        runOnUiThread {
+            btnRec.text = "⏺  Înregistrează"
+            btnRec.setBackgroundColor(0xFF455A64.toInt())
+            val secs = nbytes / (SR.toLong() * 2)
+            if (nbytes > 0) Toast.makeText(this, "Salvat: ${wavFile?.name} (${secs}s) — în Înregistrări", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Scrie un bloc PCM (mono 16-bit) in fisierul WAV curent. Apelat din thread-ul audio. */
+    private fun writePcmToWav(buf: ShortArray, n: Int) {
+        val raf = wavRaf ?: return
+        try {
+            val b = ByteArray(n * 2)
+            for (i in 0 until n) {
+                val s = buf[i].toInt()
+                b[i * 2] = (s and 0xFF).toByte()
+                b[i * 2 + 1] = ((s shr 8) and 0xFF).toByte()
+            }
+            synchronized(wavLock) {
+                if (recording && wavRaf === raf) { raf.write(b); wavBytes += b.size }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun writeIntLE(raf: RandomAccessFile, v: Int) {
+        raf.write(byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte(),
+            ((v shr 16) and 0xFF).toByte(), ((v shr 24) and 0xFF).toByte()))
+    }
+
+    private fun writeShortLE(raf: RandomAccessFile, v: Int) {
+        raf.write(byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte()))
+    }
+
+    /** Header WAV PCM 16-bit mono @ SR. dataLen=0 la start; corectat la stop. */
+    private fun writeWavHeader(raf: RandomAccessFile, dataLen: Int) {
+        val ch = 1; val bits = 16
+        val byteRate = SR * ch * bits / 8
+        raf.seek(0)
+        raf.writeBytes("RIFF"); writeIntLE(raf, 36 + dataLen); raf.writeBytes("WAVE")
+        raf.writeBytes("fmt "); writeIntLE(raf, 16); writeShortLE(raf, 1); writeShortLE(raf, ch)
+        writeIntLE(raf, SR); writeIntLE(raf, byteRate); writeShortLE(raf, ch * bits / 8); writeShortLE(raf, bits)
+        raf.writeBytes("data"); writeIntLE(raf, dataLen)
     }
 
     // ── descarcare model + etichete (o data) ──────────────────────────────────
