@@ -1,10 +1,15 @@
 package com.example.logger
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
+import android.location.Location
+import android.location.LocationManager
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
@@ -64,7 +69,16 @@ class LiveListenActivity : AppCompatActivity() {
     private val SR = 48000
     private val WIN = 144000     // 3.0 s
     private val HOP = 72000      // 1.5 s -> actualizare ~ la 1.5 s
-    private val CONFIRM = 0.20f  // prag adaugare in sesiune (permisiv: BirdNET da des 0.2-0.4 pt pasari reale)
+
+    // prag reglabil din UI (sensibilitate). Mai sus = mai putine confuzii (ex. cioara->huhurez), mai putine specii.
+    @Volatile private var minScore = 0.30f   // prag afisare/sesiune; era 0.10/0.20 (prea permisiv)
+
+    // ── vizualizare semnal + selectie microfon + locatie ──
+    private lateinit var spectro: SpectrogramView
+    private lateinit var tvMic: TextView
+    @Volatile private var selectedMic: AudioDeviceInfo? = null   // null = implicit (Android alege)
+    @Volatile private var liveLat: Double = Double.NaN
+    @Volatile private var liveLon: Double = Double.NaN
 
     private val modelDir get() = File(filesDir, "birdnet")
     private val modelFile get() = File(modelDir, "model.tflite")
@@ -109,6 +123,32 @@ class LiveListenActivity : AppCompatActivity() {
         }
         root.addView(btnRec, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)).apply {
             topMargin = dp(8)
+        })
+
+        // ── microfon + sensibilitate ──
+        val ctrlRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        ctrlRow.addView(Button(this).apply {
+            text = "🎙 Microfon"; textSize = 13f; setTextColor(Color.WHITE); setBackgroundColor(0xFF37474F.toInt())
+            setOnClickListener { pickMic() }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        ctrlRow.addView(Button(this).apply {
+            text = "🎚 Sensibilitate"; textSize = 13f; setTextColor(Color.WHITE); setBackgroundColor(0xFF37474F.toInt())
+            setOnClickListener { pickSensitivity() }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(8) })
+        root.addView(ctrlRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+
+        tvMic = TextView(this).apply {
+            text = "Microfon: implicit  ·  locație: —"; setTextColor(0xFF78909C.toInt()); textSize = 11f
+            setPadding(0, dp(4), 0, dp(2))
+        }
+        root.addView(tvMic)
+
+        // ── spectrograma live (ce „aude" microfonul) ──
+        spectro = SpectrogramView(this)
+        root.addView(spectro, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(150)).apply { topMargin = dp(6) })
+        root.addView(TextView(this).apply {
+            text = "↑ spectrograma live: jos=grav, sus=acut (până la 12 kHz). Bara de jos = nivel; roșu = clipping."
+            setTextColor(0xFF546E7A.toInt()); textSize = 10f; setPadding(0, dp(2), 0, 0)
         })
 
         root.addView(TextView(this).apply {
@@ -166,6 +206,8 @@ class LiveListenActivity : AppCompatActivity() {
         if (code == PERM_REQ) {
             if (results.isNotEmpty() && results[0] == PackageManager.PERMISSION_GRANTED) startListening()
             else Toast.makeText(this, "Fără acces la microfon nu pot asculta.", Toast.LENGTH_LONG).show()
+        } else if (code == 702) {
+            if (results.isNotEmpty() && results[0] == PackageManager.PERMISSION_GRANTED) captureLocation()
         }
     }
 
@@ -184,6 +226,7 @@ class LiveListenActivity : AppCompatActivity() {
     private fun beginAudio() {
         if (listening || isFinishing || isDestroyed) return
         listening = true
+        captureLocation()   // ia locatia ca sa putem geo-taga inregistrarile live
         // ține ecranul aprins cât ascultăm (fără screensaver care oprea sesiunea)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         btnToggle.text = "⏹  Oprește"
@@ -231,6 +274,11 @@ class LiveListenActivity : AppCompatActivity() {
             try { rec?.release() } catch (_: Exception) {}
             return
         }
+        // forteaza microfonul ales de utilizator (intern/extern/USB); null = lasa Android sa aleaga
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try { rec.setPreferredDevice(selectedMic) } catch (_: Exception) {}
+        }
+        runOnUiThread { updateMicLabel(rec) }
 
         val ring = FloatArray(WIN)
         var pos = 0
@@ -244,6 +292,7 @@ class LiveListenActivity : AppCompatActivity() {
                 val n = rec.read(pcm, 0, pcm.size)
                 if (n <= 0) continue
                 if (recording) writePcmToWav(pcm, n)
+                spectro.push(pcm, n)
                 for (i in 0 until n) {
                     ring[pos] = pcm[i].toFloat() / 32768f
                     pos = (pos + 1) % WIN
@@ -253,7 +302,7 @@ class LiveListenActivity : AppCompatActivity() {
                     since = 0
                     val w = FloatArray(WIN)
                     for (k in 0 until WIN) w[k] = ring[(pos + k) % WIN]   // pos = cel mai vechi (ring plin)
-                    val preds = try { cls.classify(w, 5, 0.10f) } catch (e: Exception) { emptyList() }
+                    val preds = try { cls.classify(w, 5, minScore * 0.6f) } catch (e: Exception) { emptyList() }
                     runOnUiThread { renderCurrent(preds); mergeSession(preds) }
                 }
             }
@@ -294,7 +343,7 @@ class LiveListenActivity : AppCompatActivity() {
     private fun mergeSession(preds: List<BirdNetClassifier.Pred>) {
         var changed = false
         for (p in preds) {
-            if (p.score < CONFIRM) continue
+            if (p.score < minScore) continue
             val key = p.sci.ifBlank { p.common }
             val a = session[key]
             if (a == null) {
@@ -330,6 +379,10 @@ class LiveListenActivity : AppCompatActivity() {
         try {
             val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val dir = File(Storage.baseDir(this), "session_live_$ts").apply { mkdirs() }
+            // geo-tag: salveaza locatia langa audio (upload-ul o foloseste pt harta + filtru local)
+            if (!liveLat.isNaN()) {
+                try { File(dir, "location.txt").writeText(String.format(Locale.US, "%.6f,%.6f", liveLat, liveLon)) } catch (_: Exception) {}
+            }
             val f = File(dir, "audio_live_$ts.wav")
             val raf = RandomAccessFile(f, "rw")
             writeWavHeader(raf, 0)
@@ -491,6 +544,77 @@ class LiveListenActivity : AppCompatActivity() {
             try { conn.disconnect() } catch (_: Exception) {}
             try { if (tmp.exists()) tmp.delete() } catch (_: Exception) {}
         }
+    }
+
+    // ── selectie microfon ──────────────────────────────────────────────────────
+    private fun inputDevices(): List<AudioDeviceInfo> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return emptyList()
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        return am.getDevices(AudioManager.GET_DEVICES_INPUTS).filter { it.type != AudioDeviceInfo.TYPE_TELEPHONY }
+    }
+
+    private fun micTypeName(d: AudioDeviceInfo): String = when (d.type) {
+        AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Microfon telefon"
+        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB extern"
+        AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Jack (cu fir)"
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth"
+        else -> d.productName?.toString() ?: "Intrare ${d.type}"
+    }
+
+    private fun pickMic() {
+        val devs = inputDevices()
+        if (devs.isEmpty()) { Toast.makeText(this, "Nu pot enumera microfoanele pe acest telefon.", Toast.LENGTH_SHORT).show(); return }
+        val labels = ArrayList<String>(); labels.add("Implicit (Android alege)")
+        devs.forEach { labels.add(micTypeName(it) + "  ·  " + (it.productName?.toString() ?: "")) }
+        AlertDialog.Builder(this)
+            .setTitle("Alege microfonul")
+            .setItems(labels.toTypedArray()) { _, which ->
+                selectedMic = if (which == 0) null else devs[which - 1]
+                val nm = if (selectedMic == null) "implicit" else micTypeName(selectedMic!!)
+                Toast.makeText(this, "Microfon: $nm" + (if (listening) " — repornește ascultarea ca să se aplice" else ""), Toast.LENGTH_LONG).show()
+                updateMicLabel(null)
+            }.show()
+    }
+
+    private fun pickSensitivity() {
+        val opts = arrayOf("Permisiv (multe specii, mai multe greșeli)", "Normal (recomandat)", "Strict (doar sigure)")
+        val vals = floatArrayOf(0.15f, 0.30f, 0.50f)
+        AlertDialog.Builder(this)
+            .setTitle("Sensibilitate identificare")
+            .setItems(opts) { _, which ->
+                minScore = vals[which]
+                Toast.makeText(this, "Sensibilitate: ${opts[which].substringBefore(" (")}", Toast.LENGTH_SHORT).show()
+            }.show()
+    }
+
+    private fun updateMicLabel(rec: AudioRecord?) {
+        val micTxt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && rec != null) {
+            try { rec.routedDevice?.let { micTypeName(it) } ?: (if (selectedMic == null) "implicit" else micTypeName(selectedMic!!)) }
+            catch (_: Exception) { if (selectedMic == null) "implicit" else micTypeName(selectedMic!!) }
+        } else if (selectedMic != null) micTypeName(selectedMic!!) else "implicit"
+        val loc = if (!liveLat.isNaN()) String.format(Locale.US, "%.5f, %.5f", liveLat, liveLon) else "—"
+        tvMic.text = "Microfon: $micTxt  ·  locație: $loc"
+    }
+
+    // ── locatie (pt geo-tag inregistrari + viitor filtru local) ─────────────────
+    private fun captureLocation() {
+        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!fine && !coarse) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 702)
+            return
+        }
+        try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            var best: Location? = null
+            for (p in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
+                try {
+                    val l = lm.getLastKnownLocation(p) ?: continue
+                    if (best == null || l.accuracy < best!!.accuracy) best = l
+                } catch (_: SecurityException) {}
+            }
+            if (best != null) { liveLat = best!!.latitude; liveLon = best!!.longitude; runOnUiThread { updateMicLabel(null) } }
+        } catch (_: Exception) {}
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
